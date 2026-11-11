@@ -97,7 +97,8 @@
 - 成本：不对每条消息调用 LLM。记录是纯本地写入；LLM 只在被唤醒（@ / 拍一拍 / 关键词）时调用。
 - 工作区洁净（2026-11-12 定）：测试与调试只允许在明确的临时目录（如仓库内 `.smoke_tmp/` 或系统临时目录）产生文件，
   **不得在仓库根或 `D:\workspace` 根留下 `data/`、`*.log`、`*.db`、脚本副本**；每次验证结束前清理，收尾时用
-  `git status` 与目录列表自查。原因：M3 调试时在 `D:\workspace` 根留下了 `data/`（AstrBot 根被当成当前目录）和两个日志。
+  `git status` 与目录列表自查。原因：M3 调试时在 `D:\workspace` 根留下了 `data/`（AstrBot 根被当成当前目录）和两个日志；
+  M4 调试又把 `astrbot run` 的输出 tee 成了 `D:\workspace\_m4_run.log`。跑服务的日志一律写 `$env:TEMP`。
 
 ## 6. 接口与数据
 
