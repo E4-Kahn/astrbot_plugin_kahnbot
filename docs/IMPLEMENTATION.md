@@ -38,7 +38,8 @@ astrbot_plugin_kahnbot/
 ### M1 —— 数据层与记录（可独立验证）
 
 - 建 `data/plugin_data/astrbot_plugin_kahnbot/`，初始化 SQLite（`message` / `fact_index` / `wake_quota` / `meta`），开 WAL。
-- catch-all handler：`event_message_type(GROUP_MESSAGE)` + `priority(100)`，**只写本地库**，不碰 LLM。
+- catch-all handler：`@filter.event_message_type(EventMessageType.GROUP_MESSAGE, priority=100)`
+  （priority 只能写在**最内层**装饰器上，见 capabilities §14.1），**只写本地库**，不碰 LLM。
 - 噪音过滤（F13）：`#sl` 等固定文本直接丢弃，记录与唤醒都不参与。
 - 指令：`/kahn`（沿用）、`/kahn memory list`、`/kahn memory forget <id>`。
 - 覆盖：F6、F8a、F11、F13。

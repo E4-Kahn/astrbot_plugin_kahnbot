@@ -244,6 +244,94 @@ dim = ep.get_dim()
 - **拍一拍不算唤醒**：`is_at_or_wake_command` 不会因它置真（全库检索无相关分支），
   所以 AstrBot 不会自动让 LLM 回应拍一拍。
 - 响应侧支持对拍一拍回戳：`core/pipeline/respond/stage.py:56`（`Comp.Poke` 允许回复）。
+  注意这里的 `Comp` 是 `core` 内部的模块别名（`import astrbot.core.message.components as Comp`），
+  **插件里没有这个符号**，要写 `from astrbot.api.message_components import Poke` 再用 `isinstance`。
 
 ⇒ KahnBot 可以在 handler 里检查 `event.get_messages()` 里是否有 `Poke` 组件，
 自己决定"当作唤醒"还是"只记录"。
+
+## 14. 写代码前逐条核对过的 API（易错点）
+
+这一节是实现阶段的"防踩坑清单"，每一条都在 4.29.4 源码里确认过。
+
+### 14.1 优先级不是装饰器，是关键字参数
+
+**没有 `@filter.priority(...)` 这个函数**：`astrbot/api/event/filter/__init__.py:46-78`
+的 `__all__` 里没有 priority。
+
+优先级走的是「任意 `register_*` 装饰器的 `**kwargs` → `md.extras_configs`」：
+
+- `register_event_message_type(event_message_type, **kwargs)`（`core/star/register/star_handler.py:263-275`）
+  把 `**kwargs` 原样交给 `get_handler_or_create`，后者把它存成 `md.extras_configs`（`:69`）。
+- 默认值 0 是 registry.append 时才补的（`core/star/star_handler.py:21-22`）。
+- 排序：`self._handlers.sort(key=lambda h: -h.extras_configs["priority"])`（`:26`）⇒ **数值越大越先执行**。
+
+写法：
+
+```python
+@filter.event_message_type(EventMessageType.GROUP_MESSAGE, priority=100)
+async def on_group_message(self, event: AstrMessageEvent): ...
+```
+
+**坑（很重要）**：`get_handler_or_create` 先按 `handler_full_name`（`模块_函数名`）查已有
+metadata，命中就直接返回（`core/star/register/star_handler.py:50-53`）；`extras_configs`
+只在**创建那一刻**赋值。装饰器自下而上执行，所以 **`priority=` 只有写在最内层（最先执行）
+的那个装饰器上才生效**——把它拆成两个装饰器、或者写在上面那层，优先级会被静默丢弃。
+
+### 14.2 钩子方法的绑定方式
+
+`metadata.star_cls` 存的是**实例**（`star_manager.py:1230-1241`），注册时
+
+```python
+handler.handler = functools.partial(raw_handler, metadata.star_cls)   # :1268-1279
+```
+
+调用是 `await handler.handler(event, *args, **kwargs)`（`core/pipeline/context_utils.py:119`），
+所以照常写 `async def on_llm_request(self, event, req)` 就行，不用 `@staticmethod`。
+
+### 14.3 中止钩子要调 `event.stop_event()`
+
+`call_event_hook` **不读 handler 的返回值**（`core/pipeline/context_utils.py:78-154`），
+它只看 `event.is_stopped()`（`:148-154`）。而调用点写的是
+
+```python
+if await call_event_hook(event, EventType.OnLLMRequestEvent, req):
+    return        # core/pipeline/process_stage/method/agent_sub_stages/internal.py:307
+```
+
+⇒ 想在 `on_llm_request` 里**阻止这次 LLM 请求**，必须 `event.stop_event()`；`return True` 无效。
+
+### 14.4 导入路径
+
+- `EventMessageType` 在 `astrbot.api.event.filter`（`filter/__init__.py:3-6`），
+  **不在** `astrbot.api.event`（那里只导出 `AstrMessageEvent` / `AstrMessageEvent` 系列事件类）。
+- 组件：`from astrbot.api.message_components import Poke, Plain, At`；`Comp` 只是 core 内部别名。
+- `EmbeddingProvider` 在 `astrbot.core.provider.provider:329`。
+
+### 14.5 Embedding Provider 的确切签名
+
+| 成员 | 位置 | 签名 |
+| --- | --- | --- |
+| `get_embedding` | `core/provider/provider.py:336` | `async def get_embedding(self, text: str) -> list[float]` |
+| `get_embeddings` | `:341` | `async def get_embeddings(self, text: list[str]) -> list[list[float]]` |
+| `get_embeddings_batch` | `:353` | `async def get_embeddings_batch(self, text, batch_size=16, tasks_limit=3, max_retries=3, progress_callback=None)` |
+| `get_dim` | `:346` | `def get_dim(self) -> int`（**同步**） |
+
+`context.get_provider_by_id(provider_id)` 在 `core/star/context.py:456-485`，内部
+`inst_map.get(...)`，**取不到只打 warning 并返回 None**，调用方必须判空。
+
+### 14.6 数据目录
+
+`StarTools.get_data_dir()`（`core/star/star_tools.py:244-298`）无参调用时沿调用栈找
+本插件的 `star_map` 记录反查名字，`mkdir` 后返回 `resolve()` 过的 `Path`。
+⇒ 在 `__init__` 里拿一次存成 `self.data_dir` 即可，不要在 handler 里反复调。
+
+### 14.7 闸门与抑制默认 LLM
+
+- 闸门（`core/pipeline/process_stage/stage.py:66-70`）：
+  `not event._has_send_oper and event.is_at_or_wake_command and not event.call_llm`。
+- `event.call_llm` 默认 `False`（`astr_message_event.py:145`），由 `should_call_llm(flag)` 设置
+  （`:442-447`）；名字反直觉——`True` 表示**禁止**默认 LLM 链路。
+- `event.get_self_id()` 在 `astr_message_event.py:269`。
+- `EventMessageType` 是 `enum.Flag`（`GROUP_MESSAGE` / `PRIVATE_MESSAGE` / `OTHER_MESSAGE` / `ALL`，
+  `core/star/filter/event_message_type.py:10-14`），filter 只比对 `event.get_message_type()`（`:28-32`）。

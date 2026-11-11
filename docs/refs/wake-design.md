@@ -6,8 +6,7 @@
 ## 1. 一个 handler 干三件事
 
 ```python
-@filter.event_message_type(EventMessageType.GROUP_MESSAGE)
-@filter.priority(100)          # 越大越先跑，先记录再让别人处理
+@filter.event_message_type(EventMessageType.GROUP_MESSAGE, priority=100)
 async def on_group_message(self, event: AstrMessageEvent):
     await self.recorder.record(event)          # ① 永远记录，不看唤醒
 
