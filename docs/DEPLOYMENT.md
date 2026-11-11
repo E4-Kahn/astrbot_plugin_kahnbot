@@ -104,13 +104,36 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot.git
 - 插件列表出现 KahnBot，无加载报错；
 - 私聊发 `/kahn`，返回版本/状态四行文本。
 
-## 6. 记忆功能所需配置（随功能落地补）
+## 6. 模型配置（会话模型 + 嵌入模型）
 
-- AstrBot WebUI → 服务提供商 → 新增 → **OpenAI 兼容**，类型选 embedding：
-  - Base URL：`https://api.siliconflow.cn/v1`
-  - 模型：`BAAI/bge-m3`
+两类模型职责不同，都要配：
+
+| 用途 | 类型参数 | 说明 |
+| --- | --- | --- |
+| 说话、汇总、主动消息生成 | 会话模型（chat） | 任选一家，AstrBot 里已有则不用动 |
+| 记忆检索的向量化 | `openai_embedding`（OpenAI API Embedding 适配器） | bge-m3 只做向量，不负责说话 |
+
+### 6.1 嵌入模型（bge-m3）
+
+- AstrBot WebUI → 服务提供商 → 新增，类型选 **OpenAI API Embedding 提供商适配器**：
+  - API Base：`https://api.siliconflow.cn/v1`
+  - 模型：`BAAI/bge-m3`（维度 1024）
   - API Key：自备
-- 插件配置里填该 Provider 的 ID（字段落地后补）。
+- 本地离线替代：类型 `ollama_embedding`，Base `http://localhost:11434`，模型 `bge-m3`。
+- 插件配置 `embedding_provider_id` 留空 = 自动取第一个启用的 embedding provider，不必手填 UUID。
+
+### 6.2 会话模型（OpenCode Go 特殊点）
+
+OpenCode Go 要求请求带 **`x-opencode-session`**（每次会话一个稳定 ID），否则报
+`400 Request is missing x-opencode-session`；还要求 User-Agent 能标识客户端（AstrBot 默认发
+`astrbot/<version>`，已满足）。
+
+- 在 provider source 的「自定义请求头」里加：`x-opencode-session: <固定 UUID>`（一个机器人一个值即可）。
+- 端点按模型的**原生 API** 选：`deepseek-v4.1-flash` 是 chat completions 模型 →
+  类型 `openai_chat_completion`，Base `https://opencode.ai/inference/go/openai/v1`；
+  只有 `/responses` 类模型（GPT 6 Luna、Grok 4.7 等）才用 `openai_responses` +
+  Base `https://opencode.ai/inference/go/openai/v1`。
+- 出处：<https://opencode.ai/docs/console/go/>（Where can I use it? / Endpoints 两节）。
 
 ## 7. 联调验收清单
 
