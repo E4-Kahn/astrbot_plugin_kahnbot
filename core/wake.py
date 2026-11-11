@@ -68,7 +68,8 @@ def is_command_event(event: AstrMessageEvent) -> bool:
     用 activated_handlers 里的 filter 类型判断，避免自己猜前缀：
     `wake_prefix`（默认 `/`）在 waking_check 阶段已经被剥掉，靠字符串看不出来。
     """
-    handlers = event.get_extra("activated_handlers") or []
+    getter = getattr(event, "get_extra", None)
+    handlers = (getter("activated_handlers") if getter else None) or []
     for handler in handlers:
         for flt in getattr(handler, "event_filters", []) or []:
             if type(flt).__name__ in {"CommandFilter", "CommandGroupFilter"}:

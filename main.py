@@ -127,6 +127,11 @@ class KahnBot(Star):
         if self.cfg.is_noise(text):
             return
 
+        # 指令是控制流量：不进流水、不推情绪（F13 的口径）。
+        # 否则 /kahn memory add … 会被当成"主人说过的话"记下来，以后还会被汇总成记忆。
+        if wake.is_command_event(event):
+            return
+
         try:
             self.recorder.record(event)
         except Exception:
@@ -134,10 +139,6 @@ class KahnBot(Star):
             logger.exception("%s 记录消息失败", PLUGIN_NAME)
 
         self._touch_emotion(event, sender_id, text)
-
-        # 指令由指令 handler 自己回，不参与防抖、也不需要放行 LLM
-        if wake.is_command_event(event):
-            return
 
         reason = wake.detect(event, self.cfg)
         if reason is None:

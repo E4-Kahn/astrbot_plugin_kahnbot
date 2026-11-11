@@ -50,6 +50,9 @@
 - `/kahn memory add`、`/kahn recall` 的正文参数改为 `GreedyStr`：之前用普通 `str`，AstrBot 按空格切参数，
   带空格的内容会被切碎，末尾的"重要度 80"还会被当成第二个位置参数并抛
   `参数 importance 类型错误`。现在正文整段接收，"重要度 N"从末尾剥离（`core/args.py`）。
+- `/kahn …` 指令不再进流水：catch-all 记录原本把指令也当成聊天记下来（`/` 前缀已被
+  waking_check 剥掉，所以看起来像"主人说了 kahn memory add …"）。现在按 `activated_handlers`
+  里的 filter 类型识别指令并跳过，同时也跳过情绪推进。
 ### 变更
 
 - 仓库与插件目录更名为 `astrbot_plugin_kahnbot`，与插件标识符保持一致。原先仓库目录名为 `kahnbot`，与 `metadata.yaml` 的 `name` 不一致，会导致 WebUI 安装与手动 clone 得到两个不同目录、两份不同配置。

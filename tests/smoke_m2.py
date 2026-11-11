@@ -128,6 +128,16 @@ def test_command_detect() -> None:
     handler = type("H", (), {"event_filters": [CommandFilter()]})()
     assert wake.is_command_event(FakeEvent("kahn status", activated=[handler])) is True
     assert wake.is_command_event(FakeEvent("鱼宝在吗")) is False
+
+    # 指令不能进流水：/kahn memory add … 曾经被当成主人说的话记下来
+    store = Store(tmpdir("cmdrecord") / "kahnbot.db")
+    store.open()
+    rec = Recorder(store, load_config({"owner_ids": ["10001"]}))
+    assert rec.record(FakeEvent("kahn memory add 下周三体检", activated=[handler])) is False
+    assert store.count_messages() == 0
+    assert rec.record(FakeEvent("下周三体检")) is True
+    assert store.count_messages() == 1
+    store.close()
     print("wake.is_command_event ok")
 
 

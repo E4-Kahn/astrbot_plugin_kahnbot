@@ -11,6 +11,7 @@ from astrbot.api.event import AstrMessageEvent
 
 from .config import Config
 from .store import Store, now_ts
+from .wake import is_command_event
 
 # 纯表情/图片/语音这类消息 `message_str` 是空的（见 capabilities §16），
 # 记录时补一个和模型看到的一致的占位符，否则这条消息在流水里直接消失。
@@ -43,6 +44,10 @@ class Recorder:
 
     def record(self, event: AstrMessageEvent) -> bool:
         """写入一条流水；被过滤或无需记录时返回 False。"""
+        # 指令是控制流量，不是聊天内容：/kahn … 不进流水（F13）
+        if is_command_event(event):
+            return False
+
         text = (event.get_message_str() or "").strip()
         if not text:
             text = placeholder_text(event)
