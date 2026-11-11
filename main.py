@@ -2,8 +2,8 @@
 
 这里只做三件事：读配置、建数据层、注册 handler / 指令；业务逻辑都在 `core/` 下。
 
-当前进度：M2（唤醒与配额）——群聊里只有 @ 她、拍一拍她、或者叫她的名字才会进 LLM，
-其余消息只记录（`on_llm_request` 注入最近群聊是 M3 的事）；私聊必回；
+当前进度：M3（情绪层）——她有九个情绪维度和五个档位，靠心跳漂移；
+群聊里只有 @ 她、拍一拍她、或者叫她的名字才会进 LLM；私聊必回；
 连续短消息有 2 秒静默窗口，合并成一次回复。
 """
 
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import time
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
@@ -20,7 +21,10 @@ from astrbot.api.star import Context, Star, StarTools
 
 from .core import wake
 from .core.config import Config, load_config
+from .core.emotion import Emotion
+from .core.heartbeat import Heartbeat
 from .core.recorder import Recorder
+from .core.state import load_state, save_state
 from .core.store import Store
 
 PLUGIN_NAME = "astrbot_plugin_kahnbot"
@@ -49,6 +53,21 @@ class KahnBot(Star):
 
         # 防抖窗口：umo -> {seq, deadline, texts, reason}
         self._pending: dict[str, dict[str, Any]] = {}
+
+        # 情绪 + 心跳（M3）：状态存 state.json，与记忆同目录
+        self.state_path = self.data_dir / "state.json"
+        self.emotion = Emotion(load_state(self.state_path))
+        self._last_activity = 0.0
+        self.heartbeat = Heartbeat(
+            PLUGIN_NAME,
+            self.emotion,
+            self.state_path,
+            activity=lambda: self._last_activity,
+        )
+        if not self.heartbeat.start():
+            logger.warning("%s 心跳未启动（没有事件循环），将在第一条消息时重试", PLUGIN_NAME)
+        # 首次加载就把状态落盘：心跳要到 45 分钟后才第一次 tick，别让人以为没生效
+        save_state(self.state_path, self.emotion.snapshot())
 
         logger.info(
             "%s v%s 已加载（enabled=%s，数据目录=%s，已记录 %s 条，名字表=%s）",
@@ -96,6 +115,8 @@ class KahnBot(Star):
         except Exception:
             # 记录失败不能影响正常对话
             logger.exception("%s 记录消息失败", PLUGIN_NAME)
+
+        self._touch_emotion(event, sender_id, text)
 
         # 指令由指令 handler 自己回，不参与防抖、也不需要放行 LLM
         if wake.is_command_event(event):
@@ -150,9 +171,32 @@ class KahnBot(Star):
             f"唤醒：@ / 拍一拍 / {'、'.join(self.cfg.wake_names) or '（无名字）'}",
             f"陌生人私聊：{'屏蔽' if self.cfg.stranger_block_active else '不屏蔽（未配置主人）'}",
             f"今日唤醒：{quota} / {self.cfg.quota_daily}（主人与管理员不计）",
-            "当前进度：M2（只唤醒，不检索记忆）。",
+            f"心情：{self.emotion.mood_label()}",
+            "当前进度：M3（有情绪，但还不会检索记忆）。",
         ]
         yield event.plain_result("\n".join(lines))
+
+    @kahn.command("mood")
+    async def kahn_mood(self, event: AstrMessageEvent, topic: str = ""):
+        """查看她的心情（/kahn mood why 看最近的变化）"""
+        raw = (topic or "").strip()
+        if not raw:
+            raw = (event.get_message_str() or "").split(maxsplit=2)[-1].strip()
+        if raw in {"why", "原因", "为什么"}:
+            log = self.emotion.state.get("log") or []
+            if not log:
+                yield event.plain_result("还没有记录到情绪变化。")
+                return
+            lines = ["最近几次情绪变化："]
+            for item in log[-8:]:
+                when = time.strftime("%m-%d %H:%M", time.localtime(int(item.get("ts", 0))))
+                lines.append(
+                    f"{when} {item.get('reason', '')} → {item.get('mode', '')}"
+                    f"（blame {item.get('blame', 0)}）"
+                )
+            yield event.plain_result("\n".join(lines))
+            return
+        yield event.plain_result("\n".join(self.emotion.describe()))
 
     @kahn.group("memory")
     def kahn_memory(self) -> None:
@@ -197,10 +241,42 @@ class KahnBot(Star):
     async def terminate(self) -> None:
         """插件被卸载 / 重载 / 停用时调用。"""
         self._pending.clear()
+        await self.heartbeat.stop()
+        save_state(self.state_path, self.emotion.snapshot())
         if self.store is not None:
             self.store.close()
             self.store = None
         logger.info("%s 已卸载", PLUGIN_NAME)
+
+    # ------------------------------------------------------------------ 情绪
+
+    def _touch_emotion(self, event: AstrMessageEvent, sender_id: str, text: str) -> None:
+        """把这条消息翻译成情绪变化（M3）。
+
+        只有主人能推动 blame（F20）；心跳没起来时在这里补启动，
+        因为 `__init__` 有时拿不到正在运行的事件循环。
+        """
+        self._last_activity = time.time()
+        if not self.heartbeat.running:
+            self.heartbeat.start()
+        try:
+            changed = False
+            if self._is_owner(event, sender_id):
+                changed = self.emotion.on_owner_text(text) is not None
+            if wake.is_poke_to_self(event, str(event.get_self_id() or "")):
+                self.emotion.on_poke()
+                changed = True
+            if changed:
+                # 状态很小（几百字节），有事就落盘，免得进程被杀丢脾气
+                save_state(self.state_path, self.emotion.snapshot())
+        except Exception:
+            logger.exception("%s 更新情绪失败", PLUGIN_NAME)
+
+    def _is_owner(self, event: AstrMessageEvent, sender_id: str) -> bool:
+        if self.cfg.is_owner(sender_id):
+            return True
+        # 没配 owner_ids 时，把私聊当作主人（与 M1 的失败即放行保持一致）
+        return not self.cfg.owner_ids and event.is_private_chat()
 
     # ------------------------------------------------------------------ 防抖
 

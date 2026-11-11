@@ -1,6 +1,6 @@
 # 情绪层设计（心跳驱动）
 
-> 状态：2026-11-11 方向已确认（F17–F20），细节待 M3 实现时校准。
+> 状态：2026-11-12 已落地（M3，`core/emotion.py` + `core/heartbeat.py`）；§7、§10、§11 分别在 M5、M6 落地。
 > 依据：`refs/astrbot_plugin_fish_heart.md`（机制与坑）、`refs/memory-design.md`（记忆层）。
 
 ## 1. 定位

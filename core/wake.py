@@ -23,7 +23,7 @@ def message_components(event: AstrMessageEvent) -> list:
     return list(getattr(obj, "message", None) or [])
 
 
-def _is_poke_to_self(event: AstrMessageEvent, self_id: str) -> bool:
+def is_poke_to_self(event: AstrMessageEvent, self_id: str) -> bool:
     if not self_id:
         return False
     for comp in message_components(event):
@@ -50,7 +50,7 @@ def detect(event: AstrMessageEvent, cfg: Config) -> str | None:
     """返回唤醒原因；返回 None 表示"只当上下文，别回"。"""
     self_id = str(event.get_self_id() or "")
 
-    if cfg.wake_on_poke and _is_poke_to_self(event, self_id):
+    if cfg.wake_on_poke and is_poke_to_self(event, self_id):
         return POKE
     if _is_at_self(event, self_id):
         return AT
@@ -87,6 +87,7 @@ __all__ = [
     "PRIVATE",
     "detect",
     "is_command_event",
+    "is_poke_to_self",
     "message_components",
     "poke_speech",
 ]

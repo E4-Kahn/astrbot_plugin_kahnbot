@@ -21,13 +21,24 @@
 - 配置新增 `wake_on_poke`、`wake_on_name`、`wake_names`、`quota_enabled`、`quota_daily`、`debounce_seconds`、`debounce_max_seconds`、`block_stranger_private`。
 - `tests/smoke_m2.py`：唤醒判定、指令识别、占位符、配额、防抖窗口与等待上限的离线冒烟。
 
+### 新增（M3：情绪层）
+
+- `core/emotion.py`：九维情绪（attachment / curiosity / reflection / duty / social / fatigue / intimacy / stress / joy）、`blame`、`expectation`，每个维度有自己的回归速率；五档 `daily` / `aggrieved` / `angry` / `afraid` / `avoidant`（`avoidant` 留给 M6 的"躲"）。
+- 只有主人能推动 `blame`（F20）：夸奖 / 道谢降 5，责骂涨 15，道歉 / 哄降 30；群友的话只进流水。
+- 拍一拍：被拍 +社交 +愉悦；生气档被拍会额外涨 `blame`（被戳更烦）。
+- `core/heartbeat.py`：唯一的钟——基础 45 分钟、最近一小时有人说话时 15 分钟；30 秒轮询 + 到点判定；关机回来用闭式解 `v = base + (v-base)*(1-rate)^n` 一次补完（n 封顶 96）。
+- `core/state.py` + `data/<插件>/state.json`：临时文件 + `os.replace` 原子落盘，旧版本缺字段自动补全。
+- `/kahn mood`：九维进度条 + 档位 + 最近一次情绪变化；`/kahn mood why` 看情绪日志。
+- `<emotion>` 的自然语言渲染已经就绪（日常且无偏离时不注入），真正挂到请求上是 M4 的事。
+- `tests/smoke_m3.py`：漂移收敛、闭式解与逐次漂移等价、五档边界、主人事件、拍一拍、渲染、状态补全、心跳补跳的离线冒烟。
+
 ### 变更
 
 - 仓库与插件目录更名为 `astrbot_plugin_kahnbot`，与插件标识符保持一致。原先仓库目录名为 `kahnbot`，与 `metadata.yaml` 的 `name` 不一致，会导致 WebUI 安装与手动 clone 得到两个不同目录、两份不同配置。
 
 ### 文档
 
-- 需求清单 `docs/REQUIREMENTS.md` 整理为 F1–F22 与 Q1–Q12；记忆相关 F3–F9、唤醒 F10–F13、注入与主动说话 F14–F16、情绪与心跳 F17–F22 已确认。
+- 需求清单 `docs/REQUIREMENTS.md` 整理为 F1–F24 与 Q1–Q12；记忆相关 F3–F9、唤醒 F10–F13、注入与主动说话 F14–F16、情绪与心跳 F17–F22、防抖与陌生人私聊 F23–F24 已确认；"不做什么"与使用范围（私聊 + 4~5 人小群）已写实。
 - 新增 `docs/refs/`：`astrbot-capabilities.md`（AstrBot 4.29.4 能力核对，含踩坑）、`memory-design.md`（记忆数据与检索设计）、`wake-design.md`（唤醒与配额设计）、`emotion-design.md`（九维情绪、心跳、事实分层、主动说话）、`dsh-memory-keeper.md` 与 `astrbot_plugin_fish_heart.md`（参考插件调研）、`deployment.md`（部署评审记录）。
 - 新增 `docs/IMPLEMENTATION.md`（M1–M6 里程碑）与 `docs/DEPLOYMENT.md`（从零部署清单，含 embedding / 会话模型配置）。
 - 逐条核对文档里的源码引用（AstrBot 4.29.4 / SnowLuma），修正失效行号与错误的 `TextPart` 导入路径。

@@ -2,9 +2,9 @@
 
 KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](https://github.com/E4-Kahn/astrbot_plugin_kahnbot)）。
 
-> 当前进度 **M2（唤醒与配额）**：群聊里只有 @ 她、拍一拍她、或者叫到名字才会进模型，
-> 其余消息只进本地流水；私聊必回，连续短消息有 2 秒静默窗口合并成一次回复。
-> `/kahn status`、`/kahn memory list`、`/kahn memory forget <id>` 可用。
+> 当前进度 **M3（情绪层）**：她有九个情绪维度、五个档位，靠心跳自己漂移；被夸奖、被骂、
+> 被拍一拍都会变，`/kahn mood` 能看到当前状态与最近的变化。唤醒、配额、防抖同 M2：
+> 群聊里只有 @ 她、拍一拍她、或者叫到名字才会进模型，其余消息只进本地流水。
 > 需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，实现顺序见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
 
 ## 环境要求
@@ -55,6 +55,8 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | `/kahn status` | 查看版本、运行状态、数据目录、已记录条数、今日唤醒次数 |
 | `/kahn memory list [n]` | 查看最近 n 条记录（默认 10） |
 | `/kahn memory forget <id>` | 删除一条记录（仅主人 / AstrBot 管理员） |
+| `/kahn mood` | 查看九维状态、当前档位与最近一次情绪变化 |
+| `/kahn mood why` | 只看最近几次情绪变化的日志 |
 
 ## 目录结构
 
@@ -65,10 +67,14 @@ astrbot_plugin_kahnbot/
 │   ├── config.py            # 配置收敛与默认值
 │   ├── store.py             # SQLite：流水 / 记忆索引 / 配额 / meta
 │   ├── recorder.py          # catch-all 记录 + 噪音过滤 + 占位符
-│   └── wake.py              # 唤醒判定：@ / 拍一拍 / 名字 / 私聊
+│   ├── wake.py              # 唤醒判定：@ / 拍一拍 / 名字 / 私聊
+│   ├── emotion.py           # 九维情绪、五档、主人情绪事件
+│   ├── heartbeat.py         # 唯一的钟：45/15 分钟 tick + 闭式解补跳
+│   └── state.py             # state.json 原子读写
 ├── tests/                   # 离线冒烟（不启动 AstrBot）
 │   ├── smoke_m1.py          # 数据层
-│   └── smoke_m2.py          # 唤醒 / 配额 / 防抖
+│   ├── smoke_m2.py          # 唤醒 / 配额 / 防抖
+│   └── smoke_m3.py          # 情绪漂移 / 五档 / 心跳补跳
 ├── metadata.yaml            # 插件元数据（名称/版本/作者/仓库）
 ├── _conf_schema.json        # WebUI 配置表单
 ├── requirements.txt         # 第三方依赖（暂无）

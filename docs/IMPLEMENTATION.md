@@ -67,7 +67,7 @@ astrbot_plugin_kahnbot/
   真机 `astrbot run` 加载无报错，日志确认名字表与 `owner_ids` 未配置的告警。
 - 验收：`DEPLOYMENT.md` 验收表第 2~7 条全过（待群里实测）。
 
-### M3 —— 情绪层（纯离线，不花一分钱）
+### M3 —— 情绪层（纯离线，不花一分钱）✅ 2026-11-12
 
 - `emotion.py`：九维驱动与 `base`/`rate` 常量表、`mode_of()` 五档；`blame` 只由主人推动（F20）。
 - `heartbeat.py`：`asyncio.create_task` + `asyncio.sleep(30)` 轮询；基础 45 分钟、活跃期 15 分钟；
@@ -76,6 +76,11 @@ astrbot_plugin_kahnbot/
 - `state.json` 持久化，`terminate` 时落盘。
 - 指令 `/kahn mood`（F22）。
 - 覆盖：F17、F18、F20、F22（F19 的联动点留接口）。
+- 落地情况：`core/emotion.py`、`core/heartbeat.py`、`core/state.py` 新增；`main.py` 在 catch-all
+  里把主人消息翻译成情绪事件（夸奖/责骂/道歉），拍一拍单独加分；心跳在没有事件循环时延迟到
+  第一条消息启动；`state.json` 在加载、tick、情绪事件、卸载四个时机落盘。
+  离线冒烟 `tests/smoke_m3.py`（漂移收敛、闭式解与逐次等价、五档边界、主人事件、拍一拍、
+  渲染、状态补全、心跳补跳封顶）通过；真机 `astrbot run` 加载无报错，`state.json` 已生成。
 - 验收：手工把 `blame` 设到 50 → `/kahn mood` 显示生气档；重启后数值保留；
   模拟关机 6 小时再启动，一次 tick 就补到正确量级（不循环 72 次）。
 
