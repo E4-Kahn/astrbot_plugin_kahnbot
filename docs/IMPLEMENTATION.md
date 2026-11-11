@@ -1,6 +1,6 @@
 # 实现计划（实施里程碑）
 
-> 状态：草案 v2，2026-11-11。需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F22），
+> 状态：v3，2026-11-12；M1~M3 已落地，M4~M6 待做。需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
 > 设计依据 [`refs/memory-design.md`](refs/memory-design.md)、[`refs/wake-design.md`](refs/wake-design.md)
 > 与 [`refs/emotion-design.md`](refs/emotion-design.md)。
 > 本文只排顺序与验收，不写实现细节；细节以设计笔记为准。
@@ -12,26 +12,28 @@
 - 0.x 阶段不做兼容包袱：表结构变更直接改 schema，`meta` 里记版本号，启动时按版本重建。
 - 代码文件按职责拆，`main.py` 只做注册与串联，避免回到脚手架那种"什么都塞入口文件"的形态。
 
-## 1. 模块划分（拟）
+## 1. 模块划分（拟 → 已落地部分按实际更新，2026-11-12）
 
 ```
 astrbot_plugin_kahnbot/
 ├── main.py                 # 注册 handler / 指令 / 生命周期，不写业务
 ├── core/
-│   ├── config.py           # 读配置、默认值、类型收敛
-│   ├── store.py            # SQLite：建表、迁移、WAL、四张表读写
-│   ├── recorder.py         # catch-all 记录 + 噪音过滤 + 昵称缓存
-│   ├── wake.py             # 唤醒判定（at / poke / name）+ 放行
-│   ├── quota.py            # 每日唤醒配额
+│   ├── config.py           # 读配置、默认值、类型收敛 ✅
+│   ├── store.py            # SQLite：建表、迁移、WAL、四张表读写 ✅
+│   ├── recorder.py         # catch-all 记录 + 噪音过滤 + 昵称缓存 ✅
+│   ├── wake.py             # 唤醒判定（at / poke / name）+ 放行 ✅
+│   ├── emotion.py          # 九维情绪、五档模式、拍一拍反应 ✅
+│   ├── heartbeat.py        # 唯一的钟：tick 调度、补跳、主动说话触发 ✅
+│   ├── state.py            # state.json 原子读写 ✅
+│   ├── quota.py            # （未单独建文件）配额落在 store.py + main.py
 │   ├── memory.py           # md 读写、pin、30 天衰减归档
 │   ├── briefing.py         # 定时汇总：流水 → LLM 提炼 → 落条目
 │   ├── retriever.py        # 向量 + 字面混合检索
 │   ├── embeddings.py       # 复用 AstrBot Embedding Provider
 │   ├── injector.py         # on_llm_request 注入 <memory> / <recent_group_chat> / <emotion>
-│   ├── emotion.py          # 九维情绪、五档模式、拍一拍反应
-│   ├── heartbeat.py        # 唯一的钟：tick 调度、补跳、主动说话触发
 │   ├── proactive.py        # 主动消息生成、防重复、回写历史
 │   └── trust.py            # 事实分层 owner / observed / raw
+├── tests/                  # 离线冒烟（不启动 AstrBot）✅
 └── _conf_schema.json
 ```
 
@@ -150,14 +152,15 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
 | 唤醒后 `event.send()` 早于放行 | 回复被跳过 | 唤醒路径上禁止提前 send（wake-design §3.1） |
 | 主动消息不回写历史 | 她"说完就忘"，且其它插件看不到 | `send_message` 成功后必须 `update_conversation`（F16 验收项） |
 | 群友转述被当成事实 | 谣言变提醒 | 事实三层（F21），提醒只读 `owner` 层 |
-| 心跳任务与重载并发 | 重载后两个 tick 同时写库 | `terminate` 里 `task.cancel()` + `await`，与写库共用同一把锁 |
+| 心跳任务与重载并发 | 重载后两个 tick 同时写库 | `terminate` 里 `task.cancel()` + `await`；心跳只写 `state.json`（原子替换），不碰 SQLite |
 | SQLite 并发写 | `database is locked` | WAL + 单连接串行写 + 超时重试 |
 
 ## 6. 待补
 
 - [ ] 汇总用什么模型（跟随 AstrBot 默认 provider 还是单独指定）。
-- [ ] `/kahn` 指令的最终形态（现在是 status，之后要挂 memory / mood 子指令）。
-- [ ] `/kahn memory forget` 是否限管理员。
+- [x] `/kahn` 指令的最终形态：指令组 + `status` / `memory list|forget` / `mood [why]` 已落地。
+- [x] `/kahn memory forget` 是否限管理员：限主人或 AstrBot 管理员。
 - [ ] "记住…"识别方式（Q8：正则直存 / 唤醒后工具调用 / 折中）。
 - [ ] 情绪参数（base/rate/阈值）初值，M3 跑一周后校准。
 - [ ] 是否需要 WebUI 配置页（AstrBot 插件配置页自动由 schema 生成，够用则不做；`/kahn mood` 已覆盖查看需求）。
+- [ ] `astrbot_version` 下限：只在 4.29.4 上实测过，要不要从 `>=4.24.0` 抬高。

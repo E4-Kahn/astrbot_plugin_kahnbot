@@ -321,8 +321,8 @@ if not event.is_private_chat():
 
 ## 10. 待定与风险
 
-- [ ] F14 注入位置（`extra_user_content_parts` vs `system_prompt`）、F15 注入节流、F16 主动说话 → 等用户拍板 Q5~Q7。
-- [ ] SQLite 并发：多群同时写入需 `WAL` 模式 + 单连接串行化，否则易锁（实测 `journal_mode=wal` 可正常启用）。
+- [x] F14 注入位置、F15 注入预算与去重、F16 主动说话 → 均已拍板（Q5~Q7），见 REQUIREMENTS 功能表。
+- [ ] SQLite 并发：多群同时写入需 `WAL` 模式 + 单连接串行化，否则易锁（实测 `journal_mode=wal` 可正常启用，M1 已开）。
 - [ ] md 与索引一致性：只改 md 不改库（手动编辑）时，需在启动/检索时校验重建。
 - [ ] 汇总任务与消息高峰的冲突：放后台队列，别在事件管线里跑。
 - [ ] 私聊/群聊的 `umo` 差别要让模型明确知道，否则回答会串场。

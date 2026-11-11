@@ -164,6 +164,6 @@ await self.context.conversation_manager.update_conversation(...)
 
 ## 13. 待定
 
-- `rate`/`base` 的取值：M3 写常量表，跑一周再校准。
+- `rate`/`base` 的取值：M3 已写常量表（`core/emotion.py` 的 `BASE` / `RATES`），跑一周再校准。
 - 是否要"心境随昼夜"（凌晨 `fatigue` 上升）：暂无，先不加。
-- `/kahn mood` 输出格式：九维进度条 + 当前档位 + 最近一次情绪变化原因。
+- ~~`/kahn mood` 输出格式~~：已定并实现——九维进度条 + 当前档位 + 最近一次情绪变化原因（`/kahn mood why` 看日志）。

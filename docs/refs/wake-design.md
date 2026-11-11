@@ -1,7 +1,7 @@
 # 唤醒设计（catch-all + 第四种唤醒）
 
-> 状态：设计草案，2026-11-11
-> 关联：REQUIREMENTS F10 / F11 / F12，capabilities 第 9、13 节
+> 状态：已落地（M2，`core/wake.py` + `main.py` 的 catch-all + `wake_quota`），2026-11-12
+> 关联：REQUIREMENTS F10 / F11 / F12 / F23 / F24，capabilities 第 9、13 节
 
 ## 1. 一个 handler 干三件事
 

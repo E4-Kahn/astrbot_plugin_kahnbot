@@ -32,7 +32,7 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `enabled` | bool | `true` | 总开关，关闭后不记录、不响应指令、不主动发消息 |
+| `enabled` | bool | `true` | 总开关：关闭后不记录、不唤醒、不发消息；`/kahn` 指令仍然可用（便于确认状态） |
 | `debug` | bool | `false` | 输出更详细的调试日志 |
 | `owner_ids` | list | `[]` | 主人 ID（QQ 号，不是昵称）；决定谁的话能进可提醒的事实层 |
 | `noise_patterns` | list | `["#sl"]` | 记录过滤：这些固定文本不进流水、不参与唤醒 |
@@ -52,7 +52,7 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | 命令 | 说明 |
 | --- | --- |
 | `/kahn` | 单独发送时列出所有子指令 |
-| `/kahn status` | 查看版本、运行状态、数据目录、已记录条数、今日唤醒次数 |
+| `/kahn status` | 查看版本、运行状态、数据目录、已记录条数、今日唤醒次数、当前心情 |
 | `/kahn memory list [n]` | 查看最近 n 条记录（默认 10） |
 | `/kahn memory forget <id>` | 删除一条记录（仅主人 / AstrBot 管理员） |
 | `/kahn mood` | 查看九维状态、当前档位与最近一次情绪变化 |

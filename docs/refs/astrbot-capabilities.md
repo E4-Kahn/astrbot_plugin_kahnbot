@@ -204,8 +204,9 @@ if (not event._has_send_oper and event.is_at_or_wake_command and not event.call_
 ## 11. 待核实
 
 - [ ] `on_llm_request` / `llm_tool` 最早出现在哪个版本 → 决定 `astrbot_version` 下限。
-      保守做法：直接把下限抬到实测版本 `>=4.29.4`。
-- [ ] `data/plugin_data/<name>/` 的实际读写权限与并发（多群并发写同一文件的风险）。
+      只在 4.29.4 上实测过；保守做法是把下限抬到 `>=4.29.4`（待拍板）。
+- [x] `data/plugin_data/<name>/` 的并发：M1 起开 WAL + 单连接串行写，`state.json` 用原子替换；
+      多群并发写入的极端情况仍未压测。
 
 ## 12. Embedding Provider（给向量检索用）
 
