@@ -43,16 +43,28 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 
 ```text
 astrbot_plugin_kahnbot/
-├── main.py              # 插件入口，继承 Star 的类会被自动识别
-├── metadata.yaml        # 插件元数据（名称/版本/作者/仓库）
-├── _conf_schema.json    # WebUI 配置表单
-├── requirements.txt     # 第三方依赖（暂无）
+├── main.py                  # 插件入口（注册串联）
+├── metadata.yaml            # 插件元数据（名称/版本/作者/仓库）
+├── _conf_schema.json        # WebUI 配置表单
+├── requirements.txt         # 第三方依赖（暂无）
 ├── docs/
-│   └── REQUIREMENTS.md  # 需求文档
+│   ├── REQUIREMENTS.md      # 需求清单（单一事实来源）
+│   ├── IMPLEMENTATION.md    # 实现里程碑 M1~M6
+│   ├── DEPLOYMENT.md        # 从零部署清单（SnowLuma / AstrBot / 插件 / 模型）
+│   └── refs/                # 设计与调研笔记（索引见 docs/refs/README.md）
 ├── CHANGELOG.md
 ├── LICENSE
 └── README.md
 ```
+
+## 文档
+
+| 文档 | 用途 |
+| --- | --- |
+| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求清单与未决问题，先定需求再写代码 |
+| [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) | 里程碑、模块划分与每阶段验收 |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | 部署与模型配置清单 |
+| [docs/refs/](docs/refs/README.md) | 参考插件笔记、AstrBot 能力核对、记忆/唤醒/情绪设计 |
 
 ## 开发
 

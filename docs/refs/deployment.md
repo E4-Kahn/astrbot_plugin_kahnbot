@@ -1,6 +1,7 @@
 # 部署拓扑与配置评审（SnowLuma + AstrBot）
 
 > 定稿日期：2026-11-11。本文只记录**运行环境**结论，不涉及插件代码。
+> 逐步操作清单在 [`../DEPLOYMENT.md`](../DEPLOYMENT.md)，本文保留配置评审的证据（端口默认值、token 校验、`statusCommand` 语义）。
 
 ## 1. 拓扑
 

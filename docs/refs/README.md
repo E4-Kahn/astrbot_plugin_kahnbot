@@ -3,6 +3,18 @@
 这里存放对每个参考 AstrBot 插件的调研笔记。**只记录结论与证据，不抄源码**；
 需求条目在 [`../REQUIREMENTS.md`](../REQUIREMENTS.md)，本目录只做支撑材料。
 
+## 索引
+
+| 文件 | 内容 |
+| --- | --- |
+| [astrbot-capabilities.md](astrbot-capabilities.md) | AstrBot 4.29.4 能力核对：钩子、注入位置、说话人归属、唤醒、Embedding、优先级、闸门 |
+| [memory-design.md](memory-design.md) | 记忆层设计：数据落点、md/SQLite 结构、写入、检索、注入、老化、隐私、事实分层 |
+| [wake-design.md](wake-design.md) | 唤醒与配额：handler 顺序、`is_at_or_wake_command`、拍一拍、`wake_quota`、噪音过滤 |
+| [emotion-design.md](emotion-design.md) | 情绪与心跳：九维、五档、tick 与补跳、情绪↔记忆联动、主动说话、沉默补偿 |
+| [dsh-memory-keeper.md](dsh-memory-keeper.md) | 参考插件 1：`dsh-memory-keeper`（检索层，非记忆系统） |
+| [astrbot_plugin_fish_heart.md](astrbot_plugin_fish_heart.md) | 参考插件 2：`astrbot_plugin_fish_heart`（状态机 + 心跳 + 主动说话） |
+| [deployment.md](deployment.md) | 部署配置评审的原始证据（端口、token 校验），清单本身见 [`../DEPLOYMENT.md`](../DEPLOYMENT.md) |
+
 ## 命名
 
 `<插件标识符>.md`，例如 `astrbot_plugin_xyz.md`。插件标识符取 `metadata.yaml` 的 `name`。

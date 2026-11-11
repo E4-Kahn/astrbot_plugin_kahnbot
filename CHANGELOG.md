@@ -8,9 +8,9 @@
 
 ### 文档
 
-- 需求清单 `docs/REQUIREMENTS.md` 整理为 F1–F16（F14–F16 待拍板）与 Q1–Q7。
-- 新增 `docs/refs/`：`astrbot-capabilities.md`（AstrBot 4.29.4 能力核对，含踩坑）、`memory-design.md`（记忆数据与检索设计草案）、`wake-design.md`（唤醒与配额设计）、`dsh-memory-keeper.md` 与 `astrbot_plugin_fish_heart.md`（参考插件调研）、`deployment.md`（部署评审记录）。
-- 新增 `docs/IMPLEMENTATION.md`（M1–M5 里程碑）与 `docs/DEPLOYMENT.md`（从零部署清单）。
+- 需求清单 `docs/REQUIREMENTS.md` 整理为 F1–F22 与 Q1–Q12；记忆相关 F3–F9、唤醒 F10–F13、注入与主动说话 F14–F16、情绪与心跳 F17–F22 已确认。
+- 新增 `docs/refs/`：`astrbot-capabilities.md`（AstrBot 4.29.4 能力核对，含踩坑）、`memory-design.md`（记忆数据与检索设计）、`wake-design.md`（唤醒与配额设计）、`emotion-design.md`（九维情绪、心跳、事实分层、主动说话）、`dsh-memory-keeper.md` 与 `astrbot_plugin_fish_heart.md`（参考插件调研）、`deployment.md`（部署评审记录）。
+- 新增 `docs/IMPLEMENTATION.md`（M1–M6 里程碑）与 `docs/DEPLOYMENT.md`（从零部署清单，含 embedding / 会话模型配置）。
 - 逐条核对文档里的源码引用（AstrBot 4.29.4 / SnowLuma），修正失效行号与错误的 `TextPart` 导入路径。
 
 ## [0.1.0] - 2026-11-11
