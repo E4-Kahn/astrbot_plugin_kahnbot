@@ -25,10 +25,11 @@
 ```
 data/plugin_data/astrbot_plugin_kahnbot/
 ├── memory/
-│   ├── facts.md          # 长期事实，人可读可手改
+│   ├── facts.md          # owner 层：主人亲口说的事实与约定（可触发提醒）
+│   ├── observed.md       # observed 层：群友转述（只作背景，不触发提醒）
 │   └── archive.md        # 归档（F7 定稿后启用）
 ├── kahnbot.db            # SQLite：流水 + 索引元数据
-└── state.json            # 插件自身状态（最后汇总时间等）
+└── state.json            # 插件自身状态（情绪、最后汇总时间等）
 ```
 
 理由：md 负责"人要看、要改"的长期事实；SQLite 负责"量大、要查、要过滤"的流水。
@@ -39,15 +40,18 @@ data/plugin_data/astrbot_plugin_kahnbot/
 一行一条，沿用 dsh-memory-keeper 的可 grep 形态，但**扩展了归属与可见性**：
 
 ```md
-- **2026-11-11** · [群:123456|主人|uid:10001] 主人下周三要去杭州
-- **2026-11-11** · [私聊|主人|uid:10001] 主人最近在准备考试，不想被打扰
+- **2026-11-11** · [群:123456|主人|uid:10001|owner] 主人下周三要去杭州
+- **2026-11-11** · [私聊|主人|uid:10001|owner] 主人最近在准备考试，不想被打扰
+- **2026-11-11** · [群:123456|张三|uid:10002|obs] 张三说"明天是管理员的生日"
 ```
 
-字段顺序：日期 · `[来源|说话人|uid]` 正文。
+字段顺序：日期 · `[来源|说话人|uid|可信层]` 正文。
 
 - `来源`：`群:<group_id>` 或 `私聊`
 - `说话人`：`主人` / 其他人的昵称，**只给人读，不参与任何匹配**
 - `uid`：平台用户 ID（QQ 号），**唯一身份键**——去重、归属、配额、解禁、检索过滤全用它
+- `可信层`（F21）：`owner` = 主人亲口/显式记住（可触发主动提醒）；`obs` = 群友转述（只作背景，
+  注入时标注"未必属实"，排序 ×0.6，**永不触发提醒**）
 
 > 归属是硬要求（F8/F8a）。AstrBot 的 `provider_settings.identifier` 只标当前发言人，
 > 历史不带归属，所以必须在这里自己写死。
@@ -67,6 +71,7 @@ CREATE TABLE message (
     sender_id   TEXT    NOT NULL,        -- 身份键（QQ 号）
     sender_name TEXT,                    -- 当时昵称，仅供展示，可变
     is_owner    INTEGER NOT NULL DEFAULT 0,
+    is_bot      INTEGER NOT NULL DEFAULT 0,  -- 机器人自己发的（含主动消息），汇总时不当成主人事实
     text        TEXT    NOT NULL,
     msg_id      TEXT                     -- 平台消息 ID，去重用
 );
@@ -79,6 +84,7 @@ CREATE TABLE fact_index (
     text        TEXT    NOT NULL,
     hash        TEXT    NOT NULL,        -- md5(text.strip())，精确去重
     scope       TEXT    NOT NULL,        -- owner / group:<id> / private
+    source      TEXT    NOT NULL DEFAULT 'owner', -- F21：owner / observed
     visibility  TEXT    NOT NULL DEFAULT 'private', -- F9：private / public
     created_ts  INTEGER NOT NULL,
     last_hit_ts INTEGER,                 -- F7 用：被检索到的最后时间
@@ -117,6 +123,9 @@ CREATE TABLE meta (
 
 > 去重与节流是这块的主要风险：汇总过频会写出大量低价值条目。
 
+> `is_bot=1` 的行（她自己的回复与主动消息）参与"最近上下文"，但**不参与事实提炼**，
+> 否则她说过的话会被当成主人事实再喂回去。
+
 **输入**（`message` 表按 `ts` 升序，只取 `last_summary_ts` 之后的）：
 
 ```
@@ -127,9 +136,11 @@ CREATE TABLE meta (
 **提示词要点**（模型用 AstrBot 当前默认会话模型，或配置项 `summary_provider_id` 指定）：
 
 - 只抽"长期有用"的事实：偏好、计划、关系、承诺、关键日期、身份信息。
-- 不要抽：寒暄、情绪、一次性的提问、别人的转述（除非主人确认）。
+- 不要抽：寒暄、情绪、一次性的提问（**除了**明确写给主人的日期类转述，见下条）。
 - 每条必须能独立读懂（不要出现"他/那个"这类指代）。
-- 输出 JSON 数组，元素 `{"text": "...", "kind": "plan|preference|relation|fact", "confidence": 0-1}`；没有可记的就输出 `[]`。
+- 输出 JSON 数组，元素 `{"text": "...", "kind": "plan|preference|relation|fact", "source": "owner|third_party", "confidence": 0-1}`；没有可记的就输出 `[]`。
+- **`source` 判定**：原文说话人是主人 → `owner`；是群友 → `third_party`（哪怕内容是"明天是管理员生日"）。
+  只有 `owner` 进 `facts.md` 并能触发提醒；`third_party` 进 `observed.md`，注入时标注来源与"未必属实"。
 - **不许编造**：只能写原文里出现过的信息；拿不准就不写。
 
 **去重**：

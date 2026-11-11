@@ -1,8 +1,9 @@
 # 实现计划（实施里程碑）
 
-> 状态：草案 v1，2026-11-11。需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F13 已定稿），
-> 设计依据 [`refs/memory-design.md`](refs/memory-design.md) 与 [`refs/wake-design.md`](refs/wake-design.md)。
-> 本文只排顺序与验收，不写实现细节；细节以两份设计笔记为准。
+> 状态：草案 v2，2026-11-11。需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F22），
+> 设计依据 [`refs/memory-design.md`](refs/memory-design.md)、[`refs/wake-design.md`](refs/wake-design.md)
+> 与 [`refs/emotion-design.md`](refs/emotion-design.md)。
+> 本文只排顺序与验收，不写实现细节；细节以设计笔记为准。
 
 ## 0. 总原则
 
@@ -26,12 +27,16 @@ astrbot_plugin_kahnbot/
 │   ├── briefing.py         # 定时汇总：流水 → LLM 提炼 → 落条目
 │   ├── retriever.py        # 向量 + 字面混合检索
 │   ├── embeddings.py       # 复用 AstrBot Embedding Provider
-│   └── injector.py         # on_llm_request 注入 <memory> / <recent_group_chat>
+│   ├── injector.py         # on_llm_request 注入 <memory> / <recent_group_chat> / <emotion>
+│   ├── emotion.py          # 九维情绪、五档模式、拍一拍反应
+│   ├── heartbeat.py        # 唯一的钟：tick 调度、补跳、主动说话触发
+│   ├── proactive.py        # 主动消息生成、防重复、回写历史
+│   └── trust.py            # 事实分层 owner / observed / raw
 └── _conf_schema.json
 ```
 
-依赖方向：`main → (recorder, wake, quota, retriever, injector, memory, briefing) → store / config`。
-`store` 不依赖任何业务模块，便于单测。
+依赖方向：`main → (recorder, wake, quota, retriever, injector, memory, briefing, emotion, heartbeat, proactive) → store / config`。
+`store` 不依赖任何业务模块，便于单测。`heartbeat` 是唯一调度者，其它模块不自建定时任务。
 
 ## 2. 里程碑
 
@@ -53,40 +58,65 @@ astrbot_plugin_kahnbot/
 - 覆盖：F10、F12。
 - 验收：`DEPLOYMENT.md` 验收表第 2~7 条全过。
 
-### M3 —— 检索与注入（接 LLM）
+### M3 —— 情绪层（纯离线，不花一分钱）
 
-- `embeddings.py`：`context.get_provider_by_id()` → `get_embedding()`，无 provider 时降级纯字面。
+- `emotion.py`：九维驱动与 `base`/`rate` 常量表、`mode_of()` 五档；`blame` 只由主人推动（F20）。
+- `heartbeat.py`：`asyncio.create_task` + `asyncio.sleep(30)` 轮询；基础 45 分钟、活跃期 15 分钟；
+  补跳闭式解 `v = base + (v-base)*(1-rate)**n`（n 封顶 96）；tick 四步（漂移 → 记忆维护 →
+  联动 → 主动判定占位）。
+- `state.json` 持久化，`terminate` 时落盘。
+- 指令 `/kahn mood`（F22）。
+- 覆盖：F17、F18、F20、F22（F19 的联动点留接口）。
+- 验收：手工把 `blame` 设到 50 → `/kahn mood` 显示生气档；重启后数值保留；
+  模拟关机 6 小时再启动，一次 tick 就补到正确量级（不循环 72 次）。
+
+### M4 —— 检索与注入（接 LLM）
+
+- `embeddings.py`：`context.get_provider_by_id()` → `get_embedding()`；`embedding_provider_id` 留空时
+  自动取第一个启用的 embedding provider；无 provider 时降级纯字面。
 - `retriever.py`：混合排序 `0.6*余弦 + 0.4*字面`，隐私过滤（群聊只查 `public`）。
 - 触发：`register_llm_tool("recall_memory")` + 关键词直查。
-- `injector.py`：`on_llm_request` 注入 `<memory>`（相关事实）与 `<recent_group_chat>`（最近 N 条带发送者）；
-  挂 `req.extra_user_content_parts`（`TextPart(...).mark_as_temp()`），**不写 system_prompt**（F14，见 refs/astrbot-capabilities.md 第 15 节）。
-- 覆盖：F5、F9、F14。
-- 验收：场景 S2——群聊里问某件只在私聊说过的事，回答中**不得出现**该内容（F9 隔离）；主人显式解禁后再问，能检索到。
+- `injector.py`：`on_llm_request` 注入 `<memory>`、`<recent_group_chat>`、`<emotion>`；
+  `emotion` 参与调制（生气档过滤 `relation`/`intimacy` 条目，回避档不注记忆，日常不注 `<emotion>`）；
+  挂 `req.extra_user_content_parts`（`TextPart(...).mark_as_temp()`），**不写 system_prompt**
+  （F14，见 refs/astrbot-capabilities.md 第 15 节）。
+- 覆盖：F5、F9、F14、F19。
+- 验收：场景 S2——群聊里问某件只在私聊说过的事，回答中**不得出现**该内容（F9 隔离）；
+  主人显式解禁后再问，能检索到。
 
-### M4 —— 长期记忆（写入与老化）
+### M5 —— 长期记忆与事实分层
 
-- 显式"记住…"解析 → md 追加 + `fact_index` 插入 + 默认 `pinned=1`。
-- `briefing.py`：定时（默认每小时）增量读流水 → LLM 提炼 → 去重落条目。
-- 老化（F7）：30 天未命中，排序乘 `0.5 ** (天数/30)`；归档写入 `archive.md`，默认不参与检索，可显式查。
-- 覆盖：F3、F4、F7。
-- 验收：场景 S1/S3；手工把某条 `last_hit_ts` 改成 40 天前 → 排序下降且进归档。
+- 显式"记住…"解析 → `facts.md` 追加 + `fact_index` 插入 + 默认 `pinned=1`。
+- `trust.py` + `briefing.py`：汇总输出带 `source: owner|third_party`；只有 `owner` 升格进
+  `facts.md`（可触发提醒），`third_party` 落 `observed.md`（注入时标注"未必属实"、排序 ×0.6）。
+- 老化（F7）：30 天未命中，排序乘 `0.5 ** (天数/30)`；归档写入 `archive.md`，默认不参与检索。
+- 覆盖：F3、F4、F7、F21。
+- 验收：群里有人说"明天是管理员的生日" → 只进 `observed.md`，次日**不会**触发提醒；
+  主人说"下周三体检" → 进 `facts.md`，次日能提醒。
 
-### M5 —— 收尾
+### M6 —— 主动说话与收尾
 
-- `_conf_schema.json` 扩全：`embedding_provider_id`、`wake_keywords`、`wake_quota`、`noise_patterns`、`briefing_interval`、`recent_n`。
+- `proactive.py`：情绪概率路 + 记忆确定路（`owner` 层到期日程/纪念日）；
+  冷却 6 小时、日限 2 条、沉默 10 分钟；生成后 `context.send_message()`，
+  **必须** `conversation_manager.update_conversation()` 回写 assistant 轮（F16）。
+- 回避档：`event.stop_event()` + `unanswered` 补偿。
+- `_conf_schema.json` 扩全：`embedding_provider_id`、`wake_keywords`、`wake_quota_daily`、
+  `noise_patterns`、`briefing_interval`、`recent_n`、`emotion.*`、`proactive.*`。
 - README 补指令表与配置说明；CHANGELOG 起 `0.2.0`。
-- 最小自测：`tests/test_store.py`（建表/写入/迁移）、`tests/test_retriever.py`（排序与隐私过滤）。
+- 最小自测：`tests/test_store.py`（建表/写入/迁移）、`tests/test_retriever.py`（排序与隐私过滤）、
+  `tests/test_emotion.py`（五档与补跳）。
 - 覆盖：全部。
 
 ## 3. 依赖与顺序
 
 ```
-M1 ──► M2 ──► M4
+M1 ──► M2 ──► M4 ──► M5 ──► M6
  └────► M3 ──┘
 ```
 
-M3 依赖 M1 的 `fact_index` 与 `message`；M4 依赖 M3 的检索命中回写 `last_hit_ts`。
-若想更早看到效果，可先做 M1+M2（纯离线，不花 LLM 钱），再接 M3。
+M3（情绪）只依赖 M1 的 `state.json`，**可以并行先做**；M4 依赖 M3 的档位输出做注入调制；
+M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否则会把谣言当提醒发出去。
+若想零成本看到效果，先做 M1+M2+M3（全部离线，不调 LLM）。
 
 ## 4. 每阶段的固定动作
 
@@ -104,10 +134,16 @@ M3 依赖 M1 的 `fact_index` 与 `message`；M4 依赖 M3 的检索命中回写
 | Embedding 维度变化 | 旧向量失效 | `meta` 记维度与模型名，不匹配则重建索引 |
 | 拍一拍拿不到昵称 | 文案显示 QQ 号 | 流水表昵称缓存兜底 |
 | 唤醒后 `event.send()` 早于放行 | 回复被跳过 | 唤醒路径上禁止提前 send（wake-design §3.1） |
+| 主动消息不回写历史 | 她"说完就忘"，且其它插件看不到 | `send_message` 成功后必须 `update_conversation`（F16 验收项） |
+| 群友转述被当成事实 | 谣言变提醒 | 事实三层（F21），提醒只读 `owner` 层 |
+| 心跳任务与重载并发 | 重载后两个 tick 同时写库 | `terminate` 里 `task.cancel()` + `await`，与写库共用同一把锁 |
 | SQLite 并发写 | `database is locked` | WAL + 单连接串行写 + 超时重试 |
 
 ## 6. 待补
 
 - [ ] 汇总用什么模型（跟随 AstrBot 默认 provider 还是单独指定）。
-- [ ] `/kahn` 指令的最终形态（现在是 status，之后要挂 memory 子指令）。
-- [ ] 是否需要 WebUI 配置页（AstrBot 插件配置页自动由 schema 生成，够用则不做）。
+- [ ] `/kahn` 指令的最终形态（现在是 status，之后要挂 memory / mood 子指令）。
+- [ ] `/kahn memory forget` 是否限管理员。
+- [ ] "记住…"识别方式（Q8：正则直存 / 唤醒后工具调用 / 折中）。
+- [ ] 情绪参数（base/rate/阈值）初值，M3 跑一周后校准。
+- [ ] 是否需要 WebUI 配置页（AstrBot 插件配置页自动由 schema 生成，够用则不做；`/kahn mood` 已覆盖查看需求）。
