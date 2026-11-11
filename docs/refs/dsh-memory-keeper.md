@@ -1,6 +1,6 @@
 # dsh-memory-keeper（DSH cordis 插件，非 AstrBot 插件）
 
-- 来源：`D:\workspace\dsh-memory-keeper`（GitHub: flywalker68/dsh-memory-keeper）
+- 来源：`D:\workspace\refs\dsh-memory-keeper`（GitHub: flywalker68/dsh-memory-keeper）
 - 调研日期：2026-11-11
 - 代码规模：`lib/` 5 个 JS 文件约 108 KB（index.js 43.9 / search.js 28.2 / state.js 25.3 / recall.js 6.4 / embedding.js 4.0），`test.js` 34 KB，`client/client.js` 18.8 KB
 - 宿主：DSH（DeepSeek Harness）0.2.x，cordis 插件模型；Node 24+

@@ -3,6 +3,9 @@
 这里存放对每个参考 AstrBot 插件的调研笔记。**只记录结论与证据，不抄源码**；
 需求条目在 [`../REQUIREMENTS.md`](../REQUIREMENTS.md)，本目录只做支撑材料。
 
+本地参考素材统一放在 `D:\workspace\refs\`（`astrbot_plugin_fish_heart`、`dsh-memory-keeper`、`SnowLuma`），
+笔记里的「来源」按这个布局写。
+
 ## 索引
 
 | 文件 | 内容 |

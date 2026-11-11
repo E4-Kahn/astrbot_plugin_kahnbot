@@ -1,6 +1,6 @@
 # 鱼的心（astrbot_plugin_fish_heart）
 
-- 来源：`D:\workspace\astrbot_plugin_fish_heart`（仓库 `Vivy33/astrbot_plugin_fish_heart`，v0.4.0，2026-11-09）
+- 来源：`D:\workspace\refs\astrbot_plugin_fish_heart`（仓库 `Vivy33/astrbot_plugin_fish_heart`，v0.4.0，2026-11-09）
 - 元数据：`astrbot_version: ">=4.24.2"`，`support_platforms: [aiocqhttp]`，MIT（衍生自 `astrbot_plugin_emotion_core`）
 - 调研日期：2026-11-11
 - 规模：`main.py` 6635 行、`thought_engine.py` 646 行、`_conf_schema.json` 385 行（13 个顶层块）、README 720 行、CHANGELOG 582 行（0.1.0→0.4.0 共 14 个版本）
