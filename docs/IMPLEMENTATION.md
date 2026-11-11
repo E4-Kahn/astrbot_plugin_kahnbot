@@ -40,15 +40,19 @@ astrbot_plugin_kahnbot/
 
 ## 2. 里程碑
 
-### M1 —— 数据层与记录（可独立验证）
+### M1 —— 数据层与记录（可独立验证）✅ 2026-11-11
 
 - 建 `data/plugin_data/astrbot_plugin_kahnbot/`，初始化 SQLite（`message` / `fact_index` / `wake_quota` / `meta`），开 WAL。
-- catch-all handler：`@filter.event_message_type(EventMessageType.GROUP_MESSAGE, priority=100)`
+- catch-all handler：`@filter.event_message_type(EventMessageType.GROUP_MESSAGE | EventMessageType.PRIVATE_MESSAGE, priority=100)`
   （priority 只能写在**最内层**装饰器上，见 capabilities §14.1），**只写本地库**，不碰 LLM。
 - 噪音过滤（F13）：`#sl` 等固定文本直接丢弃，记录与唤醒都不参与。
-- 指令：`/kahn`（沿用）、`/kahn memory list`、`/kahn memory forget <id>`。
-- 覆盖：F6、F8a、F11、F13。
+- 指令：指令组 `/kahn` + 子指令 `/kahn status`、`/kahn memory list [n]`、`/kahn memory forget <id>`；
+  单独发 `/kahn` 由 `CommandGroupFilter` 列出子指令树（见 capabilities §14.8）。
+- 覆盖：F1、F6（流水部分）、F8a、F11、F13。
 - 验收：群里发三条 → 库里三条且带 `sender_id`/`sender_name`/`group_id`；发 `#sl` → 零条；重启进程数据仍在。
+- 落地情况：`core/config.py`、`core/store.py`、`core/recorder.py` 已完成；离线冒烟通过；
+  真机（独立测试根 `D:\workspace\_astrbot_test`，`astrbot run -p 6285`）插件加载无报错并建库成功
+  （`kahnbot.db` 四表 + 三索引 + `meta.schema_version=1` + WAL）。
 
 ### M2 —— 唤醒与配额（用户能感知到"她活了"）
 

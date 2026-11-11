@@ -2,8 +2,9 @@
 
 KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](https://github.com/E4-Kahn/astrbot_plugin_kahnbot)）。
 
-> 当前处于 **脚手架阶段**：插件加载、配置注入、日志、数据目录已经打通，`/kahn` 可以查看运行状态。
-> 具体功能在 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) 里逐条定稿后实现。
+> 当前进度 **M1（数据层与记录）**：群聊/私聊消息进本地 SQLite，`#sl` 之类固定文本被丢弃，
+> `/kahn status`、`/kahn memory list`、`/kahn memory forget <id>` 可用；这一步不调模型。
+> 需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，实现顺序见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
 
 ## 环境要求
 
@@ -30,20 +31,31 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `enabled` | bool | `true` | 总开关，关闭后不响应指令、不主动发消息 |
+| `enabled` | bool | `true` | 总开关，关闭后不记录、不响应指令、不主动发消息 |
 | `debug` | bool | `false` | 输出更详细的调试日志 |
+| `owner_ids` | list | `[]` | 主人 ID（QQ 号，不是昵称）；决定谁的话能进可提醒的事实层 |
+| `noise_patterns` | list | `["#sl"]` | 记录过滤：这些固定文本不进流水、不参与唤醒 |
+| `record_private` | bool | `true` | 是否记录私聊；私聊内容默认不会出现在群聊检索结果里 |
+| `record_self` | bool | `false` | 是否记录机器人自己的消息（正常不需要） |
 
 ## 命令
 
 | 命令 | 说明 |
 | --- | --- |
-| `/kahn` | 查看插件版本、状态和数据目录 |
+| `/kahn` | 单独发送时列出所有子指令 |
+| `/kahn status` | 查看版本、运行状态、数据目录与已记录条数 |
+| `/kahn memory list [n]` | 查看最近 n 条记录（默认 10） |
+| `/kahn memory forget <id>` | 删除一条记录（仅主人 / AstrBot 管理员） |
 
 ## 目录结构
 
 ```text
 astrbot_plugin_kahnbot/
-├── main.py                  # 插件入口（注册串联）
+├── main.py                  # 插件入口（只做注册与串联）
+├── core/                    # 业务实现
+│   ├── config.py            # 配置收敛与默认值
+│   ├── store.py             # SQLite：流水 / 记忆索引 / 配额 / meta
+│   └── recorder.py          # catch-all 记录 + 噪音过滤
 ├── metadata.yaml            # 插件元数据（名称/版本/作者/仓库）
 ├── _conf_schema.json        # WebUI 配置表单
 ├── requirements.txt         # 第三方依赖（暂无）

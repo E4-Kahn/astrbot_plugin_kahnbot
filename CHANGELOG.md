@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### 新增（M1：数据层与记录）
+
+- `core/store.py`：SQLite 数据层，四张表（`message` / `fact_index` / `wake_quota` / `meta`）+ WAL + 缺列自动补齐；数据落在 `data/plugin_data/astrbot_plugin_kahnbot/kahnbot.db`。
+- `core/recorder.py`：catch-all handler（优先级 100）把群聊/私聊消息写进流水，带 `sender_id`/`sender_name`/`group_id`/`is_owner`/`is_bot`，不唤醒、不调模型；`#sl` 等固定文本按 `noise_patterns` 丢弃。
+- 指令改为指令组：`/kahn status`、`/kahn memory list [n]`、`/kahn memory forget <id>`（删除仅限主人 / AstrBot 管理员）；单独发 `/kahn` 列出子指令。
+- 配置新增 `owner_ids`、`noise_patterns`、`record_private`、`record_self`。
+
 ### 变更
 
 - 仓库与插件目录更名为 `astrbot_plugin_kahnbot`，与插件标识符保持一致。原先仓库目录名为 `kahnbot`，与 `metadata.yaml` 的 `name` 不一致，会导致 WebUI 安装与手动 clone 得到两个不同目录、两份不同配置。
