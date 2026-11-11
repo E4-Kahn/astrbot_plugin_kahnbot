@@ -58,8 +58,9 @@ astrbot_plugin_kahnbot/
 - `embeddings.py`：`context.get_provider_by_id()` → `get_embedding()`，无 provider 时降级纯字面。
 - `retriever.py`：混合排序 `0.6*余弦 + 0.4*字面`，隐私过滤（群聊只查 `public`）。
 - 触发：`register_llm_tool("recall_memory")` + 关键词直查。
-- `injector.py`：`on_llm_request` 注入 `<memory>`（相关事实）与 `<recent_group_chat>`（最近 N 条带发送者）。
-- 覆盖：F5、F9。
+- `injector.py`：`on_llm_request` 注入 `<memory>`（相关事实）与 `<recent_group_chat>`（最近 N 条带发送者）；
+  挂 `req.extra_user_content_parts`（`TextPart(...).mark_as_temp()`），**不写 system_prompt**（F14，见 refs/astrbot-capabilities.md 第 15 节）。
+- 覆盖：F5、F9、F14。
 - 验收：场景 S2——群聊里问某件只在私聊说过的事，回答中**不得出现**该内容（F9 隔离）；主人显式解禁后再问，能检索到。
 
 ### M4 —— 长期记忆（写入与老化）

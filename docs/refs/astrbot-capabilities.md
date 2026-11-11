@@ -335,3 +335,44 @@ if await call_event_hook(event, EventType.OnLLMRequestEvent, req):
 - `event.get_self_id()` 在 `astr_message_event.py:269`。
 - `EventMessageType` 是 `enum.Flag`（`GROUP_MESSAGE` / `PRIVATE_MESSAGE` / `OTHER_MESSAGE` / `ALL`，
   `core/star/filter/event_message_type.py:10-14`），filter 只比对 `event.get_message_type()`（`:28-32`）。
+
+## 15. 注入位置与前缀缓存（2026-11-11 补，来自 fish_heart）
+
+### 15.1 两个可写位置
+
+| 位置 | 字段 | 生效时机 | 代价 |
+| --- | --- | --- | --- |
+| 系统提示 | `req.system_prompt` | 每次请求开头 | 每轮变化 ⇒ 其后所有历史按未命中重算 |
+| 额外用户内容 | `req.extra_user_content_parts` | 用户消息之后 | 只让尾部变化 |
+
+`ProviderRequest.extra_user_content_parts` 是 `list[ContentPart]`
+（`core/provider/entities.py:203`），组装时**排在用户原始发言之后**
+（`entities.py:301-316`：先 `prompt` 文本块，再逐个 part）。
+
+### 15.2 为什么 system_prompt 影响前缀缓存
+
+DeepSeek / Anthropic 等按"从开头到第一个变化点"命中缓存前缀。`system_prompt`
+在消息序列最前面，它一变，后面整段历史全部失效；价格差约 10 倍
+（fish_heart 注释 `main.py:3510-3519` 有同样的判断）。
+
+### 15.3 `mark_as_temp()` 不能省
+
+```python
+from astrbot.core.agent.message import TextPart   # 注意：不是 astrbot.api.message_components
+req.extra_user_content_parts.append(TextPart(text=body).mark_as_temp())
+```
+
+> `astrbot.api.message_components` 只是 `from astrbot.core.message.components import *`
+> 的转发（整个文件就这一行），里面是 `Plain`/`At`/`Poke` 这类**消息组件**；
+> `TextPart` 属于**内容块**（`core/agent/message.py:80`），两者不是一套东西。
+
+- `ContentPart._no_save: bool`（`core/agent/message.py:25`），`mark_as_temp()` 置 True（`:68-71`）。
+- 回存历史时跳过：`internal.py:518-524`（`if message.role in ["assistant","user"] and message._no_save: continue`）。
+- 不调用 ⇒ 注入文本每轮累积进会话历史，越聊越长，且会进下一次的 `req.contexts`。
+
+### 15.4 对 KahnBot 的含义
+
+- 记忆注记与最近群聊，**默认都挂 `extra_user_content_parts`**；
+  降级时才写 `system_prompt`（功能不受影响，只是缓存吃亏）。
+- 纯静态内容（如"你是 KahnBot 的 …"）可以留在 `system_prompt`，因为它不逐轮变。
+- 注记带上时间戳会逐轮变化，本来就不适合放系统提示。

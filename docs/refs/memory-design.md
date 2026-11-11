@@ -198,7 +198,7 @@ Embedding Provider 未配置或调用失败 → 只用字面通道，并在日�
 
 ## 7. 注入（F5 的呈现面）
 
-在 `on_llm_request` 里把检索结果拼进 `req.system_prompt`：
+在 `on_llm_request` 里构造：
 
 ```
 <memory>
@@ -208,6 +208,25 @@ Embedding Provider 未配置或调用失败 → 只用字面通道，并在日�
 
 - 只放**结论**，不放原文，控制 token。
 - 必须带来源与说话人，否则模型会把别人的话当成主人的。
+
+### 7.1 塞到哪里：不碰 `system_prompt`（F14，待拍板）
+
+**首选**（借鉴 fish_heart，见 refs/astrbot_plugin_fish_heart.md §2.2）：
+
+```python
+from astrbot.core.agent.message import TextPart   # 内容块，不是 message_components
+req.extra_user_content_parts.append(TextPart(text=body).mark_as_temp())
+```
+
+理由：DeepSeek 等前缀缓存按"开头 → 第一个变化点"命中。`system_prompt` 每轮都改，
+会让它之后的整段历史全部按未命中重算；`extra_user_content_parts` 挂在**用户消息之后**
+（`core/provider/entities.py:311-316`），只让尾部变化。
+
+`mark_as_temp()` 不可省：否则该 part 会被回存进会话历史
+（`core/agent/message.py:68-77` 置 `_no_save`；`internal.py:522-523` 只在 `_no_save` 时跳过）。
+
+**降级**：若某次请求的 `extra_user_content_parts` 不可用（字段被适配器重置），退回
+`req.system_prompt += body`——功能不受影响，只是缓存吃亏。
 
 ## 8. 老化（F7，2026-11-11 定稿）
 
@@ -246,18 +265,9 @@ if not event.is_private_chat():
 这挡住了"在群里被问到私聊内容时顺嘴说出来"——模型拿不到那段上下文，
 就不可能说漏。
 
-## 9. 隐私（F9，待定）
-
-用户明确要求：私聊内容不得在群聊泄露。
-
-待定：物理隔离（A）还是显式授权解禁（B）。
-
-本文预留字段：`visibility`。无论选哪种，**检索时必须按当前会话过滤**，
-过滤发生在 SQL 层，不依赖模型自觉。
-
 ## 10. 待定与风险
 
-- [ ] F7 参数（Q3）、F9 规则（Q4）未定 → 对应代码先不写。
+- [ ] F14 注入位置（`extra_user_content_parts` vs `system_prompt`）、F15 注入节流、F16 主动说话 → 等用户拍板 Q5~Q7。
 - [ ] SQLite 并发：多群同时写入需 `WAL` 模式 + 单连接串行化，否则易锁（实测 `journal_mode=wal` 可正常启用）。
 - [ ] md 与索引一致性：只改 md 不改库（手动编辑）时，需在启动/检索时校验重建。
 - [ ] 汇总任务与消息高峰的冲突：放后台队列，别在事件管线里跑。
