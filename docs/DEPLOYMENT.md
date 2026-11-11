@@ -124,16 +124,27 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot.git
 
 ### 6.2 会话模型（OpenCode Go 特殊点）
 
-OpenCode Go 要求请求带 **`x-opencode-session`**（每次会话一个稳定 ID），否则报
+OpenCode Go 要求请求带 **`x-opencode-session`**（每个会话一个稳定 ID），否则报
 `400 Request is missing x-opencode-session`；还要求 User-Agent 能标识客户端（AstrBot 默认发
 `astrbot/<version>`，已满足）。
 
 - 在 provider source 的「自定义请求头」里加：`x-opencode-session: <固定 UUID>`（一个机器人一个值即可）。
-- 端点按模型的**原生 API** 选：`deepseek-v4.1-flash` 是 chat completions 模型 →
-  类型 `openai_chat_completion`，Base `https://opencode.ai/inference/go/openai/v1`；
-  只有 `/responses` 类模型（GPT 6 Luna、Grok 4.7 等）才用 `openai_responses` +
-  Base `https://opencode.ai/inference/go/openai/v1`。
-- 出处：<https://opencode.ai/docs/console/go/>（Where can I use it? / Endpoints 两节）。
+- **实测可用的配置（2026-11-11，本机 `D:\workspace\Astrbot`）**：
+
+  ```
+  provider_source.type = openai_responses
+  api_base             = https://opencode.ai/inference/go/v1/
+  model                = deepseek-v4.1-flash
+  custom_headers       = {"x-opencode-session": "<UUID>"}
+  ```
+
+  即网关自己按 model 路由到 chat completions / responses，**不需要**在模型名上区分端点类型。
+
+- 注意：官方端点表（Endpoints 一节）写的是 `.../go/openai/v1/chat/completions`、
+  `.../go/openai/v1/responses` 这种按 SDK 包分开的地址，**与实际网关不一致**（文档滞后），
+  以实测为准；只有在 `.../go/v1/` 上遇到 404 时，才回头试 `.../go/openai/v1`。
+- 出处：<https://opencode.ai/docs/console/go/> 的 "Where can I use it?" 一节（请求头要求）。
+  其中 "Endpoints" 表格里的地址按实测判断是错的。
 
 ## 7. 联调验收清单
 
