@@ -18,6 +18,7 @@ env/
 .env.*
 data/
 *.log
+.smoke_tmp/
 
 # 编辑器 / 系统
 .idea/
