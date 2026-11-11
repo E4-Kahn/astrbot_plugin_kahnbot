@@ -1,0 +1,14 @@
+name: astrbot_plugin_kahnbot
+display_name: KahnBot
+short_desc: KahnBot 的 AstrBot 插件（脚手架阶段，功能待定）
+desc: |
+  KahnBot 的 AstrBot 插件。
+
+  目前是脚手架：已经打通插件加载、配置注入、日志与数据目录，命令 /kahn 可以查看运行状态。
+  具体功能会随 docs/REQUIREMENTS.md 中的需求文档逐步实现。
+version: 0.1.0
+author: E4-Kahn
+repo: https://github.com/E4-Kahn/kahnbot
+astrbot_version: ">=4.24.0"
+tags:
+  - kahnbot

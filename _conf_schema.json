@@ -1,0 +1,14 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "总开关",
+    "default": true,
+    "hint": "关闭后插件仍在运行，但不响应任何指令、不主动发送消息。"
+  },
+  "debug": {
+    "type": "bool",
+    "description": "调试日志",
+    "default": false,
+    "hint": "开启后会把更多中间过程写进日志，排查问题用，平时建议关闭。"
+  }
+}
