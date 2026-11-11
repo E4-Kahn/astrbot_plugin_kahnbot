@@ -3,7 +3,7 @@
 这里存放对每个参考 AstrBot 插件的调研笔记。**只记录结论与证据，不抄源码**；
 需求条目在 [`../REQUIREMENTS.md`](../REQUIREMENTS.md)，本目录只做支撑材料。
 
-本地参考素材统一放在 `D:\workspace\refs\`（`astrbot_plugin_fish_heart`、`astrbot_plugin_sugar_debounce`、`dsh-memory-keeper`、`SnowLuma`），
+本地参考素材统一放在 `D:\workspace\refs\`（`astrbot_plugin_fish_heart`、`astrbot_plugin_sugar_debounce`、`astrbot_plugin_memewiki`、`dsh-memory-keeper`、`SnowLuma`），
 笔记里的「来源」按这个布局写。
 
 ## 索引
@@ -17,6 +17,7 @@
 | [dsh-memory-keeper.md](dsh-memory-keeper.md) | 参考插件 1：`dsh-memory-keeper`（检索层，非记忆系统） |
 | [astrbot_plugin_fish_heart.md](astrbot_plugin_fish_heart.md) | 参考插件 2：`astrbot_plugin_fish_heart`（状态机 + 心跳 + 主动说话） |
 | [astrbot_plugin_sugar_debounce.md](astrbot_plugin_sugar_debounce.md) | 参考插件 3：`astrbot_plugin_sugar_debounce`（消息防抖：连续短句合并成一次模型调用） |
+| [astrbot_plugin_memewiki.md](astrbot_plugin_memewiki.md) | 参考插件 4：`astrbot_plugin_memewiki`（本地梗库 + 群黑话 + 按需注入） |
 | [deployment.md](deployment.md) | 部署配置评审的原始证据（端口、token 校验），清单本身见 [`../DEPLOYMENT.md`](../DEPLOYMENT.md) |
 
 ## 命名
