@@ -35,7 +35,7 @@
 
 ## 2. 请求注入点（记忆/状态注入的落点）
 
-`star_handler.py:457` 的文档示例即契约：
+`core/star/register/star_handler.py:457` 的文档示例即契约：
 
 ```py
 @on_llm_request()
@@ -59,7 +59,7 @@ async def h(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
 
 ## 3. 工具注册（`llm_tool`）
 
-- `register_llm_tool(name=None, **kwargs)`，`name` 省略则用函数名（`star_handler.py:610`）。
+- `register_llm_tool(name=None, **kwargs)`，`name` 省略则用函数名（`core/star/register/star_handler.py:610`）。
 - 参数说明**从 docstring 解析**（Google 风格 `Args:`，示例见该函数文档）。
 - 首个参数是 `event: AstrMessageEvent`，其余参数即工具入参。
 - ⇒ 检索式记忆可做成 `memory_search(query, ...)` 工具，由模型自主决定调用。
@@ -146,7 +146,7 @@ async def h(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
 
 ### 8.2 带归属的历史表
 
-`PlatformMessageHistoryManager`（`core/platform_message_history_mgr.py:8`）保存
+`PlatformMessageHistoryManager`（`core/platform_message_history_mgr.py:7`）保存
 `sender_id` / `sender_name`，按 (platform_id, user_id=umo) 分区，`max_messages` 控制保留条数。
 写入方是内置 Star `astrbot`（`builtin_stars/astrbot/main.py:142-182`），**受配置门控**：
 `provider_ltm_settings.group_message_history_enable`（默认 `False`，同文件 `:158`），且**只存群消息**。

@@ -1,4 +1,4 @@
-# 部署拓扑与配置评审（SnowLuma + AstrBot）
+﻿# 部署拓扑与配置评审（SnowLuma + AstrBot）
 
 > 定稿日期：2026-11-11。本文只记录**运行环境**结论，不涉及插件代码。
 
@@ -54,7 +54,7 @@ aiocqhttp 的反向 WS 端点就是 `/ws`（`aiocqhttp/__init__.py:140`）。
 
 ## 4. `statusCommand.enabled=false` 是对的
 
-- 默认 `enabled: true`、`trigger: '#sl'`（`packages/onebot/src/config.ts:38`、`:80`）。
+- 默认 `enabled: true`、`swallow: false`、`trigger: '#sl'`（`packages/onebot/src/config.ts:35`、`:36`、`:38`）。
 - 命中后 SnowLuma 自己回版本/平台/运行时长；若 `swallow: true` 还会**不再转发**给下游
   （`packages/onebot/src/instance.ts:453`、`:526-560`）。
 - 关掉后 `#sl` 会当普通群消息转发给 AstrBot，被 catch-all 记进流水——无害但属噪音，
