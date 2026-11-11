@@ -34,17 +34,21 @@ CREATE INDEX IF NOT EXISTS idx_msg_umo_ts ON message(umo, ts);
 CREATE INDEX IF NOT EXISTS idx_msg_sender ON message(sender_id, ts);
 
 CREATE TABLE IF NOT EXISTS fact_index (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    fact_id     TEXT    NOT NULL UNIQUE,
-    text        TEXT    NOT NULL,
-    hash        TEXT    NOT NULL,
-    scope       TEXT    NOT NULL,
-    source      TEXT    NOT NULL DEFAULT 'owner',
-    visibility  TEXT    NOT NULL DEFAULT 'private',
-    created_ts  INTEGER NOT NULL,
-    last_hit_ts INTEGER,
-    pinned      INTEGER NOT NULL DEFAULT 0,
-    archived    INTEGER NOT NULL DEFAULT 0
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    fact_id       TEXT    NOT NULL UNIQUE,
+    text          TEXT    NOT NULL,
+    hash          TEXT    NOT NULL,
+    scope         TEXT    NOT NULL,
+    source        TEXT    NOT NULL DEFAULT 'owner',
+    visibility    TEXT    NOT NULL DEFAULT 'private',
+    kind          TEXT    NOT NULL DEFAULT 'fact',
+    importance    INTEGER NOT NULL DEFAULT 50,
+    created_ts    INTEGER NOT NULL,
+    last_hit_ts   INTEGER,
+    superseded_by TEXT,
+    due_ts        INTEGER,
+    embedding     BLOB,
+    archived      INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_fact_hash ON fact_index(hash);
 
@@ -73,8 +77,12 @@ _EXPECTED_COLUMNS: dict[str, dict[str, str]] = {
     "fact_index": {
         "source": "TEXT NOT NULL DEFAULT 'owner'",
         "visibility": "TEXT NOT NULL DEFAULT 'private'",
+        "kind": "TEXT NOT NULL DEFAULT 'fact'",
+        "importance": "INTEGER NOT NULL DEFAULT 50",
         "last_hit_ts": "INTEGER",
-        "pinned": "INTEGER NOT NULL DEFAULT 0",
+        "superseded_by": "TEXT",
+        "due_ts": "INTEGER",
+        "embedding": "BLOB",
         "archived": "INTEGER NOT NULL DEFAULT 0",
     },
     "wake_quota": {
@@ -204,6 +212,101 @@ class Store:
             (sender_id,),
         ).fetchone()
         return None if row is None else str(row["sender_name"])
+
+    # ------------------------------------------------------------------ 记忆索引
+
+    def add_fact(
+        self,
+        *,
+        fact_id: str,
+        text: str,
+        hash_: str,
+        scope: str,
+        source: str,
+        visibility: str,
+        kind: str,
+        importance: int,
+        created_ts: int,
+        embedding: bytes | None = None,
+        due_ts: int | None = None,
+    ) -> int | None:
+        """写入一条记忆索引；`hash` 重复（同一条事实）时返回 None。"""
+        try:
+            cur = self.conn.execute(
+                "INSERT INTO fact_index(fact_id, text, hash, scope, source, visibility,"
+                " kind, importance, created_ts, embedding, due_ts)"
+                " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    fact_id,
+                    text,
+                    hash_,
+                    scope,
+                    source,
+                    visibility,
+                    kind,
+                    int(importance),
+                    int(created_ts),
+                    embedding,
+                    due_ts,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            return None
+        self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def get_fact(self, fact_id: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM fact_index WHERE fact_id = ?", (fact_id,)
+        ).fetchone()
+
+    def fact_by_hash(self, hash_: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM fact_index WHERE hash = ?", (hash_,)
+        ).fetchone()
+
+    def facts(
+        self,
+        *,
+        include_archived: bool = False,
+        include_superseded: bool = False,
+    ) -> list[sqlite3.Row]:
+        """检索候选：默认排除已归档与已被取代的条目。"""
+        clauses = []
+        if not include_archived:
+            clauses.append("archived = 0")
+        if not include_superseded:
+            clauses.append("superseded_by IS NULL")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        return list(
+            self.conn.execute(f"SELECT * FROM fact_index{where} ORDER BY id DESC")
+        )
+
+    def count_facts(self) -> int:
+        row = self.conn.execute("SELECT COUNT(*) AS n FROM fact_index").fetchone()
+        return int(row["n"])
+
+    def touch_facts(self, fact_ids: list[str], ts: int) -> None:
+        """检索命中即"被提起"（F7）。"""
+        if not fact_ids:
+            return
+        self.conn.executemany(
+            "UPDATE fact_index SET last_hit_ts = ? WHERE fact_id = ?",
+            [(int(ts), fid) for fid in fact_ids],
+        )
+        self.conn.commit()
+
+    def set_fact_embedding(self, fact_id: str, embedding: bytes | None) -> None:
+        self.conn.execute(
+            "UPDATE fact_index SET embedding = ? WHERE fact_id = ?",
+            (embedding, fact_id),
+        )
+        self.conn.commit()
+
+    def delete_fact(self, fact_id: str) -> bool:
+        cur = self.conn.execute("DELETE FROM fact_index WHERE fact_id = ?", (fact_id,))
+        self.conn.commit()
+        return cur.rowcount > 0
 
     # ------------------------------------------------------------------ 配额
 

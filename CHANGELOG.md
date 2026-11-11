@@ -32,6 +32,19 @@
 - `<emotion>` 的自然语言渲染已经就绪（日常且无偏离时不注入），真正挂到请求上是 M4 的事。
 - `tests/smoke_m3.py`：漂移收敛、闭式解与逐次漂移等价、五档边界、主人事件、拍一拍、渲染、状态补全、心跳补跳的离线冒烟。
 
+### 新增（M4：检索与注入）
+
+- `core/embeddings.py`：复用 AstrBot 的 embedding provider（`embedding_provider_id` 留空则取第一个启用的）；
+  向量以 float32 存 BLOB（1024 维 ≈ 4KB）；provider 缺失或调用失败时静默降级为纯字面，只告警一次。
+- `core/retriever.py`：混合排序 `(0.6*余弦 + 0.4*字面) × (0.7+0.3*重要度/100) × 时间衰减 × 0.6(转述)`；
+  中文 bigram + 英文数字分词；过滤已归档与已被取代；群聊上下文只查 `visibility='public'`；命中回写 `last_hit_ts`。
+- `core/injector.py`：`<memory>` 块拼装、单次字符预算截断、同一事实 N 轮内不重复；没有新命中就整段不注入。
+- `on_llm_request(priority=-1000)` 自动注入：`extra_user_content_parts` + `mark_as_temp()`，不写 system_prompt。
+- `fact_index` 加 `kind` / `importance` / `superseded_by` / `due_ts` / `embedding` 五列（加列式迁移，旧库自动补）。
+- 新指令：`/kahn recall <问句>`（手动检索，显示分数与来源）、`/kahn memory facts [n]`、`/kahn memory add <内容> [重要度]`。
+- 配置新增 `inject_enabled`、`embedding_provider_id`、`recall_top_k`、`recall_min_score`、`inject_max_chars`、`dedupe_turns`。
+- 实测 bge-m3：无关句子余弦约 0.48，因此 `recall_min_score` 默认取 0.35（低于 0.3 会什么都在命中）。
+- `tests/smoke_m4.py`：分词、字面分、存储往返、隐私/取代/归档过滤、排序、无向量降级、注入预算与去重的离线冒烟。
 ### 变更
 
 - 仓库与插件目录更名为 `astrbot_plugin_kahnbot`，与插件标识符保持一致。原先仓库目录名为 `kahnbot`，与 `metadata.yaml` 的 `name` 不一致，会导致 WebUI 安装与手动 clone 得到两个不同目录、两份不同配置。

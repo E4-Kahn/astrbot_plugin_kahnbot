@@ -86,6 +86,13 @@ class Config:
     debounce_max_seconds: float = 5.0
     # 陌生人私聊（F24）
     block_stranger_private: bool = True
+    # 检索与注入（F5 / F14 / F15）
+    inject_enabled: bool = True
+    embedding_provider_id: str = ""
+    recall_top_k: int = 5
+    recall_min_score: float = 0.35
+    inject_max_chars: int = 800
+    dedupe_turns: int = 5
 
     def is_owner(self, sender_id: str) -> bool:
         return bool(sender_id) and sender_id in self.owner_ids
@@ -123,4 +130,10 @@ def load_config(raw: Mapping[str, Any] | None) -> Config:
         debounce_seconds=_as_float(raw, "debounce_seconds", 2.0, 0.0, 10.0),
         debounce_max_seconds=_as_float(raw, "debounce_max_seconds", 5.0, 0.0, 30.0),
         block_stranger_private=_as_bool(raw, "block_stranger_private", True),
+        inject_enabled=_as_bool(raw, "inject_enabled", True),
+        embedding_provider_id=str(raw.get("embedding_provider_id") or "").strip(),
+        recall_top_k=_as_int(raw, "recall_top_k", 5, 1, 20),
+        recall_min_score=_as_float(raw, "recall_min_score", 0.35, 0.0, 1.0),
+        inject_max_chars=_as_int(raw, "inject_max_chars", 800, 100, 4000),
+        dedupe_turns=_as_int(raw, "dedupe_turns", 5, 0, 50),
     )

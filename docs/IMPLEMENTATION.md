@@ -1,6 +1,6 @@
 # 实现计划（实施里程碑）
 
-> 状态：v3，2026-11-12；M1~M3 已落地，M4~M6 待做。需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
+> 状态：v4，2026-11-12；M1~M4 已落地，M5~M6 待做。需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
 > 设计依据 [`refs/memory-design.md`](refs/memory-design.md)、[`refs/wake-design.md`](refs/wake-design.md)
 > 与 [`refs/emotion-design.md`](refs/emotion-design.md)。
 > 本文只排顺序与验收，不写实现细节；细节以设计笔记为准。
@@ -89,19 +89,27 @@ astrbot_plugin_kahnbot/
 - 验收：手工把 `blame` 设到 50 → `/kahn mood` 显示生气档；重启后数值保留；
   模拟关机 6 小时再启动，一次 tick 就补到正确量级（不循环 72 次）。
 
-### M4 —— 检索与注入（接 LLM）
+### M4 —— 检索与注入（接 LLM）✅ 2026-11-12
 
-- `embeddings.py`：`context.get_provider_by_id()` → `get_embedding()`；`embedding_provider_id` 留空时
-  自动取第一个启用的 embedding provider；无 provider 时降级纯字面。
-- `retriever.py`：混合排序 `0.6*余弦 + 0.4*字面`，隐私过滤（群聊只查 `public`）。
-- 触发：`register_llm_tool("recall_memory")` + 关键词直查。
-- `injector.py`：`on_llm_request` 注入 `<memory>`、`<recent_group_chat>`、`<emotion>`；
-  `emotion` 参与调制（生气档过滤 `relation`/`intimacy` 条目，回避档不注记忆，日常不注 `<emotion>`）；
-  挂 `req.extra_user_content_parts`（`TextPart(...).mark_as_temp()`），**不写 system_prompt**
-  （F14，见 refs/astrbot-capabilities.md 第 15 节）。
-- 覆盖：F5、F9、F14、F19。
-- 验收：场景 S2——群聊里问某件只在私聊说过的事，回答中**不得出现**该内容（F9 隔离）；
-  主人显式解禁后再问，能检索到。
+- `embeddings.py`：`context.get_provider_by_id()` / `get_all_embedding_providers()` → `get_embedding()`；
+  `embedding_provider_id` 留空自动取第一个启用的 embedding provider；无 provider 或调用失败时
+  静默降级为纯字面（只告警一次，不刷日志）。向量用 float32 存 BLOB（1024 维 ≈ 4KB）。
+- `retriever.py`：混合排序 `(0.6*余弦 + 0.4*字面) × (0.7+0.3*重要度/100) × 时间衰减 × 0.6(observed)`；
+  中文 bigram + 英文数字分词；过滤 `archived`、`superseded_by`，群聊上下文只查 `visibility='public'`；
+  命中即回写 `last_hit_ts`（F7 的"被提起"）。
+- `injector.py`：`<memory>` 块拼装 + 预算截断 + N 轮内去重（F15）；没有新命中就整段不注入。
+- 触发：`on_llm_request(priority=-1000)` 自动注入（M4 采用"自动注入 + 去重"；LLM 工具
+  `recall_memory` 留到确有必要再加）；`/kahn recall <问句>` 是手动验证入口。
+- 注入位置：`req.extra_user_content_parts` 追加 `TextPart(...).mark_as_temp()`，**不写 system_prompt**
+  （F14，见 refs/astrbot-capabilities.md 第 15 节）；拿不到 `TextPart` 时才退回 system_prompt。
+- 写入（本里程碑只做最小实现，供检索验证）：`/kahn memory add <内容> [重要度]` → md + 索引 + 向量；
+  「记住…」自动识别、LLM 打分、汇总提炼留到 M5。
+- 覆盖：F5、F9、F14、F15。
+- 落地情况：`core/embeddings.py`、`core/retriever.py`、`core/injector.py` 新增；`Store` 的
+  `fact_index` 加 `kind/importance/superseded_by/due_ts/embedding` 五列；离线冒烟
+  `tests/smoke_m4.py`（分词/字面分/存储往返/过滤/排序/无向量降级/注入去重与预算）通过。
+- 验收：`/kahn recall 下周三` 能列出相关条目与分数；对话里问一个只在记忆里的事，回答里体现；
+  群聊里问同一件私聊的事，回答里**不出现**该内容（F9）；连续两轮都命中的条目第二轮不重复注入。
 
 ### M5 —— 长期记忆与事实分层
 

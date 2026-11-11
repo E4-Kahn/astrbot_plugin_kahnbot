@@ -2,9 +2,9 @@
 
 KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](https://github.com/E4-Kahn/astrbot_plugin_kahnbot)）。
 
-> 当前进度 **M3（情绪层）**：她有九个情绪维度、五个档位，靠心跳自己漂移；被夸奖、被骂、
-> 被拍一拍都会变，`/kahn mood` 能看到当前状态与最近的变化。唤醒、配额、防抖同 M2：
-> 群聊里只有 @ 她、拍一拍她、或者叫到名字才会进模型，其余消息只进本地流水。
+> 当前进度 **M4（检索与注入）**：她在 M3 的情绪之上开始"记得住"——主人说过的事会被向量化，
+> 回复前把最相关的几条贴进请求（不写 system_prompt，避免毁掉前缀缓存），同一件事 5 轮内不重复，
+> 群聊里查不到私聊的记忆。写入目前只有 `/kahn memory add` 这个手动入口，「记住…」自动识别在 M5。
 > 需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，实现顺序见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
 
 ## 环境要求
@@ -46,6 +46,12 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | `debounce_seconds` | float | `2.0` | 防抖窗口：叫到后先等这么久，期间的新消息并成一次回复；填 0 关闭 |
 | `debounce_max_seconds` | float | `5.0` | 窗口连续顺延时的总等待上限 |
 | `block_stranger_private` | bool | `true` | 屏蔽陌生人私聊（不回复、不记录）；未配置 `owner_ids` 时不生效 |
+| `inject_enabled` | bool | `true` | 是否在回复前检索并注入记忆 |
+| `embedding_provider_id` | string | `""` | 向量模型 ID；留空自动用第一个启用的 embedding provider |
+| `recall_top_k` | int | `5` | 每次最多取几条记忆 |
+| `recall_min_score` | float | `0.35` | 检索分数下限（bge-m3 上无关句子约 0.29，别调到 0.3 以下） |
+| `inject_max_chars` | int | `800` | 单次注入字符上限 |
+| `dedupe_turns` | int | `5` | 同一条记忆多少轮内不重复注入；0 = 关闭去重 |
 
 ## 命令
 
@@ -53,8 +59,11 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | --- | --- |
 | `/kahn` | 单独发送时列出所有子指令 |
 | `/kahn status` | 查看版本、运行状态、数据目录、已记录条数、今日唤醒次数、当前心情 |
-| `/kahn memory list [n]` | 查看最近 n 条记录（默认 10） |
-| `/kahn memory forget <id>` | 删除一条记录（仅主人 / AstrBot 管理员） |
+| `/kahn memory list [n]` | 查看最近 n 条流水（默认 10） |
+| `/kahn memory facts [n]` | 查看记忆条目（含重要度、是否已被取代 / 已归档） |
+| `/kahn memory add <内容> [重要度]` | 手动加一条记忆（仅主人 / 管理员；M5 前用它造数据） |
+| `/kahn memory forget <id>` | 删除一条流水（仅主人 / AstrBot 管理员） |
+| `/kahn recall <问句>` | 手动检索记忆，列出分数与来源（验证 M4 用） |
 | `/kahn mood` | 查看九维状态、当前档位与最近一次情绪变化 |
 | `/kahn mood why` | 只看最近几次情绪变化的日志 |
 
@@ -70,11 +79,15 @@ astrbot_plugin_kahnbot/
 │   ├── wake.py              # 唤醒判定：@ / 拍一拍 / 名字 / 私聊
 │   ├── emotion.py           # 九维情绪、五档、主人情绪事件
 │   ├── heartbeat.py         # 唯一的钟：45/15 分钟 tick + 闭式解补跳
-│   └── state.py             # state.json 原子读写
+│   ├── state.py             # state.json 原子读写
+│   ├── embeddings.py        # 复用 AstrBot 的 embedding provider（含降级）
+│   ├── retriever.py         # 向量 + 字面混合排序、隐私/取代/归档过滤
+│   └── injector.py          # <memory> 拼装、预算截断、N 轮内去重
 ├── tests/                   # 离线冒烟（不启动 AstrBot）
 │   ├── smoke_m1.py          # 数据层
 │   ├── smoke_m2.py          # 唤醒 / 配额 / 防抖
-│   └── smoke_m3.py          # 情绪漂移 / 五档 / 心跳补跳
+│   ├── smoke_m3.py          # 情绪漂移 / 五档 / 心跳补跳
+│   └── smoke_m4.py          # 分词 / 排序 / 过滤 / 注入预算与去重
 ├── metadata.yaml            # 插件元数据（名称/版本/作者/仓库）
 ├── _conf_schema.json        # WebUI 配置表单
 ├── requirements.txt         # 第三方依赖（暂无）

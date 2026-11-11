@@ -97,5 +97,41 @@
     "description": "屏蔽陌生人私聊",
     "default": true,
     "hint": "打开后，陌生人（既不是主人也不是管理员）的私聊不回复、不记录，避免垃圾消息进记忆。"
+  },
+  "inject_enabled": {
+    "type": "bool",
+    "description": "注入记忆",
+    "default": true,
+    "hint": "开启后每次回复前会检索记忆，把最相关的几条贴进请求里。关掉后她只能靠当前对话。"
+  },
+  "embedding_provider_id": {
+    "type": "string",
+    "description": "Embedding 提供商 ID",
+    "default": "",
+    "hint": "留空 = 自动用 AstrBot 里第一个启用的向量模型（你现在配的是 openai_embedding + BAAI/bge-m3）。填了找不到时会退回只按字面匹配。"
+  },
+  "recall_top_k": {
+    "type": "int",
+    "description": "每次检索条数",
+    "default": 5,
+    "hint": "最多取几条记忆进注入。条数越多越占 token，3~6 之间比较合适。"
+  },
+  "recall_min_score": {
+    "type": "float",
+    "description": "检索分数下限",
+    "default": 0.35,
+    "hint": "低于这个分数的记忆不注入。实测 bge-m3 上无关句子的余弦约 0.48（乘 0.6 后 0.29），所以默认值不能低于 0.3，否则什么都会命中。"
+  },
+  "inject_max_chars": {
+    "type": "int",
+    "description": "注入字符上限",
+    "default": 800,
+    "hint": "一次最多注入多少字，超出按相关度截断。约 800 字 ≈ 400~500 token。"
+  },
+  "dedupe_turns": {
+    "type": "int",
+    "description": "去重轮数",
+    "default": 5,
+    "hint": "同一条记忆在这几轮内不重复注入，避免连续几轮都在说同一件事。填 0 关闭去重。"
   }
 }

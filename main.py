@@ -11,19 +11,29 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import time
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.event.filter import EventMessageType
+from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, StarTools
+
+try:  # TextPart 是内容块，不在 message_components 里（capabilities §13）
+    from astrbot.core.agent.message import TextPart
+except Exception:  # pragma: no cover - 版本差异时退回 system_prompt 注入
+    TextPart = None  # type: ignore[assignment]
 
 from .core import wake
 from .core.config import Config, load_config
+from .core.embeddings import EmbeddingClient, pack_vector
 from .core.emotion import Emotion
 from .core.heartbeat import Heartbeat
+from .core.injector import Injector, build_block
 from .core.recorder import Recorder
+from .core.retriever import Retriever
 from .core.state import load_state, save_state
 from .core.store import Store
 
@@ -53,6 +63,11 @@ class KahnBot(Star):
 
         # 防抖窗口：umo -> {seq, deadline, texts, reason}
         self._pending: dict[str, dict[str, Any]] = {}
+
+        # 检索与注入（M4）
+        self.embedder = EmbeddingClient(self.context, self.cfg.embedding_provider_id)
+        self.retriever = Retriever(self.store, self.embedder)
+        self.injector = Injector(self.cfg.dedupe_turns)
 
         # 情绪 + 心跳（M3）：状态存 state.json，与记忆同目录
         self.state_path = self.data_dir / "state.json"
@@ -151,6 +166,60 @@ class KahnBot(Star):
         if self.cfg.debug:
             logger.debug("KahnBot 唤醒（%s）：%s", reason, event.message_str[:40])
 
+    # ------------------------------------------------------------------ 检索注入
+
+    @filter.on_llm_request(priority=-1000)
+    async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
+        """把检索到的长期记忆贴到本轮请求里（F14/F15；不动 system_prompt）。"""
+        if not self.cfg.enabled or not self.cfg.inject_enabled or self.store is None:
+            return
+        if (event.get_platform_name() or "") == "cron":
+            return  # 提醒任务不查记忆，免得自己提醒自己
+        query = (req.prompt or event.get_message_str() or "").strip()
+        if len(query) < 2:
+            return
+
+        umo = event.unified_msg_origin or ""
+        owner_context = self._is_owner(event, event.get_sender_id() or "")
+        self.injector.next_turn(umo)
+        try:
+            hits = await self.retriever.search(
+                query,
+                owner_context=owner_context,
+                top_k=self.cfg.recall_top_k,
+                min_score=self.cfg.recall_min_score,
+            )
+        except Exception:
+            logger.exception("%s 检索失败", PLUGIN_NAME)
+            return
+        if not hits:
+            return
+
+        fresh = self.injector.fresh(hits, umo)
+        if not fresh:
+            if self.cfg.debug:
+                logger.debug("%s 本轮命中 %s 条但都在去重窗口内，跳过注入", PLUGIN_NAME, len(hits))
+            return
+
+        block, used = build_block(fresh, self.cfg.inject_max_chars)
+        if not block:
+            return
+        if TextPart is not None:
+            req.extra_user_content_parts.append(TextPart(text=block).mark_as_temp())
+        else:  # pragma: no cover - 只在旧版本 AstrBot 上走这里
+            req.system_prompt = (req.system_prompt or "") + "\n" + block
+        self.injector.mark(used, umo)
+
+        if self.cfg.debug:
+            logger.info(
+                "%s 注入 %s 条记忆 / %s 字（query=%r）：\n%s",
+                PLUGIN_NAME,
+                len(used),
+                len(block),
+                query[:30],
+                block,
+            )
+
     # ------------------------------------------------------------------ 指令
 
     @filter.command_group("kahn")
@@ -172,7 +241,9 @@ class KahnBot(Star):
             f"陌生人私聊：{'屏蔽' if self.cfg.stranger_block_active else '不屏蔽（未配置主人）'}",
             f"今日唤醒：{quota} / {self.cfg.quota_daily}（主人与管理员不计）",
             f"心情：{self.emotion.mood_label()}",
-            "当前进度：M3（有情绪，但还不会检索记忆）。",
+            f"记忆：{self.store.count_facts() if self.store else 0} 条；向量：{self.embedder.describe()}",
+            f"注入：{'开' if self.cfg.inject_enabled else '关'}（top {self.cfg.recall_top_k}，上限 {self.cfg.inject_max_chars} 字，{self.cfg.dedupe_turns} 轮内不重复）",
+            "当前进度：M4（能检索、会注入；「记住…」自动写入留到 M5）。",
         ]
         yield event.plain_result("\n".join(lines))
 
@@ -198,9 +269,43 @@ class KahnBot(Star):
             return
         yield event.plain_result("\n".join(self.emotion.describe()))
 
+    @kahn.command("recall")
+    async def kahn_recall(self, event: AstrMessageEvent, query: str = ""):
+        """检索记忆（/kahn recall 我下周有什么安排）"""
+        if self.store is None:
+            yield event.plain_result("数据库不可用，请查看日志。")
+            return
+        if not self._is_admin(event.get_sender_id()):
+            yield event.plain_result("只有主人或 AstrBot 管理员可以使用检索。")
+            return
+        raw = (query or "").strip()
+        if not raw:
+            raw = (event.get_message_str() or "").split(maxsplit=2)[-1].strip()
+        if not raw:
+            yield event.plain_result("用法：/kahn recall <问题或关键词>")
+            return
+
+        hits = await self.retriever.search(
+            raw,
+            owner_context=True,
+            top_k=self.cfg.recall_top_k,
+            min_score=0.0,
+        )
+        if not hits:
+            yield event.plain_result(f"没有检索到与「{raw}」相关的记忆。")
+            return
+        lines = [f"与「{raw}」相关（共 {len(hits)} 条，向量={self.embedder.describe()}）："]
+        for hit in hits:
+            when = _fmt_ts(hit.created_ts)
+            flag = "" if hit.source == "owner" else "（转述）"
+            lines.append(
+                f"#{hit.fact_id} {hit.score:.2f} 重要度{hit.importance} {when}{flag}\n  {hit.text}"
+            )
+        yield event.plain_result("\n".join(lines))
+
     @kahn.group("memory")
     def kahn_memory(self) -> None:
-        """记忆相关：list / forget"""
+        """记忆相关：list / facts / add / forget"""
 
     @kahn_memory.command("list")
     async def kahn_memory_list(self, event: AstrMessageEvent, limit: int = 10):
@@ -223,6 +328,63 @@ class KahnBot(Star):
                 text = text[:40] + "…"
             lines.append(f"#{row['id']} {when} {where} {who}{flag}：{text}")
         yield event.plain_result("\n".join(lines))
+
+    @kahn_memory.command("facts")
+    async def kahn_memory_facts(self, event: AstrMessageEvent, limit: int = 10):
+        """查看记忆条目"""
+        if self.store is None:
+            yield event.plain_result("数据库不可用，请查看日志。")
+            return
+        if not self._is_admin(event.get_sender_id()):
+            yield event.plain_result("只有主人或 AstrBot 管理员可以查看记忆。")
+            return
+        rows = self.store.facts(include_archived=True, include_superseded=True)
+        if not rows:
+            yield event.plain_result("还没有记忆条目。/kahn memory add <内容> 可以先加一条。")
+            return
+        limit = max(1, min(int(limit), 50))
+        lines = [f"记忆条目（共 {len(rows)} 条，显示最近 {min(limit, len(rows))} 条）："]
+        for row in rows[:limit]:
+            when = _fmt_ts(row["created_ts"])
+            flags = []
+            if row["superseded_by"]:
+                flags.append(f"已被{row['superseded_by']}取代")
+            if row["archived"]:
+                flags.append("已归档")
+            if row["source"] != "owner":
+                flags.append("转述")
+            tail = "".join(f"〔{flag}〕" for flag in flags)
+            lines.append(
+                f"#{row['fact_id']} {when} 重要度{row['importance']} {row['text']}{tail}"
+            )
+        yield event.plain_result("\n".join(lines))
+
+    @kahn_memory.command("add")
+    async def kahn_memory_add(self, event: AstrMessageEvent, content: str = "", importance: int = 50):
+        """手动加一条记忆（M5 会由"记住…"自动触发）"""
+        if self.store is None:
+            yield event.plain_result("数据库不可用，请查看日志。")
+            return
+        sender_id = event.get_sender_id() or ""
+        if not self._is_owner(event, sender_id) and not self._is_admin(sender_id):
+            yield event.plain_result("只有主人或 AstrBot 管理员可以添加记忆。")
+            return
+        text = (content or "").strip()
+        if not text:
+            text = (event.get_message_str() or "").split(maxsplit=3)[-1].strip()
+        if not text:
+            yield event.plain_result("用法：/kahn memory add <内容> [重要度 0-100]")
+            return
+        try:
+            fact_id = await self._remember(text, int(importance), event)
+        except Exception:
+            logger.exception("%s 写入记忆失败", PLUGIN_NAME)
+            yield event.plain_result("写入记忆失败，请查看日志。")
+            return
+        if fact_id is None:
+            yield event.plain_result("这条记忆已经记过了。")
+            return
+        yield event.plain_result(f"好，我记下了：{text}（#{fact_id}）")
 
     @kahn_memory.command("forget")
     async def kahn_memory_forget(self, event: AstrMessageEvent, row_id: int):
@@ -247,6 +409,56 @@ class KahnBot(Star):
             self.store.close()
             self.store = None
         logger.info("%s 已卸载", PLUGIN_NAME)
+
+    # ------------------------------------------------------------------ 记忆写入
+
+    async def _remember(self, text: str, importance: int, event: AstrMessageEvent) -> str | None:
+        """写一条 owner 事实：md + 索引（+ 向量）。重复内容返回 None。"""
+        if self.store is None:
+            return None
+        text = " ".join(text.split())
+        if not text:
+            return None
+        digest = hashlib.md5(text.encode("utf-8")).hexdigest()
+        if self.store.fact_by_hash(digest) is not None:
+            return None
+
+        importance = max(0, min(100, int(importance)))
+        now = int(time.time())
+        fact_id = digest[:12]
+        group_id = event.get_group_id() or ""
+        scope = f"group:{group_id}" if group_id else "private"
+
+        vec = await self.embedder.embed(text) if self.embedder.resolve() else None
+        row_id = self.store.add_fact(
+            fact_id=fact_id,
+            text=text,
+            hash_=digest,
+            scope=scope,
+            source="owner",
+            visibility="private",
+            kind="fact",
+            importance=importance,
+            created_ts=now,
+            embedding=pack_vector(vec) if vec else None,
+        )
+        if row_id is None:
+            return None
+
+        # md 是权威（索引可重建）：一行一条
+        label = "主人" if self._is_owner(event, event.get_sender_id() or "") else "管理员"
+        line = (
+            f"- **{time.strftime('%Y-%m-%d', time.localtime(now))}** · "
+            f"[{scope}|{label}|uid:{event.get_sender_id() or ''}|owner] {text}"
+            f" 〔重要度 {importance}〕"
+        )
+        try:
+            path = self.data_dir / "memory" / "facts.md"
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+        except Exception:
+            logger.exception("%s 写 facts.md 失败（索引已写入）", PLUGIN_NAME)
+        return fact_id
 
     # ------------------------------------------------------------------ 情绪
 
