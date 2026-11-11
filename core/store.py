@@ -205,6 +205,29 @@ class Store:
         ).fetchone()
         return None if row is None else str(row["sender_name"])
 
+    # ------------------------------------------------------------------ 配额
+
+    def wake_quota(self, user_id: str, day: str) -> int:
+        if not user_id or not day:
+            return 0
+        row = self.conn.execute(
+            "SELECT count FROM wake_quota WHERE user_id = ? AND day = ?",
+            (user_id, day),
+        ).fetchone()
+        return 0 if row is None else int(row["count"])
+
+    def bump_wake_quota(self, user_id: str, day: str) -> int:
+        """唤醒成功一次 +1，返回本次之后的值（F12）。"""
+        if not user_id or not day:
+            return 0
+        self.conn.execute(
+            "INSERT INTO wake_quota(user_id, day, count) VALUES(?, ?, 1) "
+            "ON CONFLICT(user_id, day) DO UPDATE SET count = count + 1",
+            (user_id, day),
+        )
+        self.conn.commit()
+        return self.wake_quota(user_id, day)
+
 
 def now_ts() -> int:
     return int(time.time())

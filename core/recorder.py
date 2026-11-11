@@ -12,6 +12,29 @@ from astrbot.api.event import AstrMessageEvent
 from .config import Config
 from .store import Store, now_ts
 
+# 纯表情/图片/语音这类消息 `message_str` 是空的（见 capabilities §16），
+# 记录时补一个和模型看到的一致的占位符，否则这条消息在流水里直接消失。
+_PLACEHOLDERS: dict[str, str] = {
+    "Image": "[图片]",
+    "Face": "[表情]",
+    "Record": "[语音]",
+    "Video": "[视频]",
+    "File": "[文件]",
+    "Poke": "[拍一拍]",
+    "Node": "[合并转发]",
+    "Nodes": "[合并转发]",
+}
+
+
+def placeholder_text(event: AstrMessageEvent) -> str:
+    obj = getattr(event, "message_obj", None)
+    labels: list[str] = []
+    for comp in getattr(obj, "message", None) or []:
+        label = _PLACEHOLDERS.get(type(comp).__name__)
+        if label and label not in labels:
+            labels.append(label)
+    return " ".join(labels)
+
 
 class Recorder:
     def __init__(self, store: Store, cfg: Config) -> None:
@@ -22,7 +45,8 @@ class Recorder:
         """写入一条流水；被过滤或无需记录时返回 False。"""
         text = (event.get_message_str() or "").strip()
         if not text:
-            # 拍一拍这类空消息暂时不记（M2 会把它们补成可读文本）
+            text = placeholder_text(event)
+        if not text:
             return False
         if self.cfg.is_noise(text):
             return False

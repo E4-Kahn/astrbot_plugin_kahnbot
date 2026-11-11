@@ -1,12 +1,12 @@
 name: astrbot_plugin_kahnbot
 display_name: KahnBot
-short_desc: 会记事、有脾气、会主动说话的群友（开发中，M1 数据层）
+short_desc: 会记事、有脾气、会主动说话的群友（开发中，M2 唤醒层）
 desc: |
   KahnBot —— 一个会记事、有脾气的群友。
 
-  当前进度 M1：群聊/私聊消息进本地 SQLite（带说话人归属），#sl 之类固定文本被丢弃；
-  可用 /kahn status、/kahn memory list [n]、/kahn memory forget <id>，这一步不调模型。
-  唤醒、情绪、检索注入、长期记忆与主动说话在后续里程碑。
+  当前进度 M2：群聊/私聊消息进本地 SQLite（带说话人归属），#sl 之类固定文本被丢弃；
+  群里只有 @ 她、拍一拍她、叫到名字才进模型，私聊必回，连续短消息并成一次回复。
+  检索注入、长期记忆、情绪与心跳、主动说话在后续里程碑。
 version: 0.1.0
 author: E4-Kahn
 repo: https://github.com/E4-Kahn/astrbot_plugin_kahnbot

@@ -2,8 +2,9 @@
 
 KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](https://github.com/E4-Kahn/astrbot_plugin_kahnbot)）。
 
-> 当前进度 **M1（数据层与记录）**：群聊/私聊消息进本地 SQLite，`#sl` 之类固定文本被丢弃，
-> `/kahn status`、`/kahn memory list`、`/kahn memory forget <id>` 可用；这一步不调模型。
+> 当前进度 **M2（唤醒与配额）**：群聊里只有 @ 她、拍一拍她、或者叫到名字才会进模型，
+> 其余消息只进本地流水；私聊必回，连续短消息有 2 秒静默窗口合并成一次回复。
+> `/kahn status`、`/kahn memory list`、`/kahn memory forget <id>` 可用。
 > 需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，实现顺序见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
 
 ## 环境要求
@@ -37,13 +38,21 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | `noise_patterns` | list | `["#sl"]` | 记录过滤：这些固定文本不进流水、不参与唤醒 |
 | `record_private` | bool | `true` | 是否记录私聊；私聊内容默认不会出现在群聊检索结果里 |
 | `record_self` | bool | `false` | 是否记录机器人自己的消息（正常不需要） |
+| `wake_on_poke` | bool | `true` | 拍一拍唤醒（拍别人的不触发） |
+| `wake_on_name` | bool | `true` | 叫名字唤醒（只在消息正文里找） |
+| `wake_names` | list | `["鱼宝","大肥鱼","鱼呢"]` | 名字表；填太常见的词会天天误触发 |
+| `quota_enabled` | bool | `true` | 每日唤醒配额（主人、管理员、私聊不计） |
+| `quota_daily` | int | `5` | 每人每天可唤醒次数，超了静默忽略但照样记录 |
+| `debounce_seconds` | float | `2.0` | 防抖窗口：叫到后先等这么久，期间的新消息并成一次回复；填 0 关闭 |
+| `debounce_max_seconds` | float | `5.0` | 窗口连续顺延时的总等待上限 |
+| `block_stranger_private` | bool | `true` | 屏蔽陌生人私聊（不回复、不记录）；未配置 `owner_ids` 时不生效 |
 
 ## 命令
 
 | 命令 | 说明 |
 | --- | --- |
 | `/kahn` | 单独发送时列出所有子指令 |
-| `/kahn status` | 查看版本、运行状态、数据目录与已记录条数 |
+| `/kahn status` | 查看版本、运行状态、数据目录、已记录条数、今日唤醒次数 |
 | `/kahn memory list [n]` | 查看最近 n 条记录（默认 10） |
 | `/kahn memory forget <id>` | 删除一条记录（仅主人 / AstrBot 管理员） |
 
@@ -55,7 +64,11 @@ astrbot_plugin_kahnbot/
 ├── core/                    # 业务实现
 │   ├── config.py            # 配置收敛与默认值
 │   ├── store.py             # SQLite：流水 / 记忆索引 / 配额 / meta
-│   └── recorder.py          # catch-all 记录 + 噪音过滤
+│   ├── recorder.py          # catch-all 记录 + 噪音过滤 + 占位符
+│   └── wake.py              # 唤醒判定：@ / 拍一拍 / 名字 / 私聊
+├── tests/                   # 离线冒烟（不启动 AstrBot）
+│   ├── smoke_m1.py          # 数据层
+│   └── smoke_m2.py          # 唤醒 / 配额 / 防抖
 ├── metadata.yaml            # 插件元数据（名称/版本/作者/仓库）
 ├── _conf_schema.json        # WebUI 配置表单
 ├── requirements.txt         # 第三方依赖（暂无）

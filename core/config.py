@@ -12,6 +12,9 @@ from typing import Any, Mapping
 # SnowLuma 的状态命令；群里谁发一句都不该进流水（F13）
 DEFAULT_NOISE: tuple[str, ...] = ("#sl",)
 
+# 默认的名字表（F10）；中英文逗号都当分隔符
+DEFAULT_NAMES: tuple[str, ...] = ("鱼宝", "大肥鱼", "鱼呢")
+
 
 def _as_bool(raw: Mapping[str, Any], key: str, default: bool) -> bool:
     value = raw.get(key, default)
@@ -38,6 +41,28 @@ def _as_str_tuple(
     return tuple(str(item).strip() for item in parts if str(item).strip())
 
 
+def _as_int(raw: Mapping[str, Any], key: str, default: int, low: int, high: int) -> int:
+    try:
+        value = int(raw.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, value))
+
+
+def _as_float(
+    raw: Mapping[str, Any],
+    key: str,
+    default: float,
+    low: float,
+    high: float,
+) -> float:
+    try:
+        value = float(raw.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, value))
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     """插件运行期配置。"""
@@ -50,9 +75,30 @@ class Config:
     noise_patterns: tuple[str, ...] = DEFAULT_NOISE
     record_private: bool = True
     record_self: bool = False
+    # 唤醒（F10 / F12）
+    wake_on_poke: bool = True
+    wake_on_name: bool = True
+    wake_names: tuple[str, ...] = DEFAULT_NAMES
+    quota_enabled: bool = True
+    quota_daily: int = 5
+    # 防抖（F23）
+    debounce_seconds: float = 2.0
+    debounce_max_seconds: float = 5.0
+    # 陌生人私聊（F24）
+    block_stranger_private: bool = True
 
     def is_owner(self, sender_id: str) -> bool:
         return bool(sender_id) and sender_id in self.owner_ids
+
+    @property
+    def stranger_block_active(self) -> bool:
+        """只有配了主人之后才敢屏蔽私聊。
+
+        反过来（`owner_ids` 空还照屏蔽）会让主人的私聊也被拦掉，
+        表现就是"装上插件以后私聊彻底不回"，排查起来很费劲，所以这里失败即放行。
+        """
+        return self.block_stranger_private and bool(self.owner_ids)
+
 
     def is_noise(self, text: str) -> bool:
         """固定文本（大小写不敏感）不算消息，也不参与唤醒。"""
@@ -69,4 +115,12 @@ def load_config(raw: Mapping[str, Any] | None) -> Config:
         noise_patterns=_as_str_tuple(raw, "noise_patterns", DEFAULT_NOISE) or DEFAULT_NOISE,
         record_private=_as_bool(raw, "record_private", True),
         record_self=_as_bool(raw, "record_self", False),
+        wake_on_poke=_as_bool(raw, "wake_on_poke", True),
+        wake_on_name=_as_bool(raw, "wake_on_name", True),
+        wake_names=_as_str_tuple(raw, "wake_names", DEFAULT_NAMES) or DEFAULT_NAMES,
+        quota_enabled=_as_bool(raw, "quota_enabled", True),
+        quota_daily=_as_int(raw, "quota_daily", 5, 0, 200),
+        debounce_seconds=_as_float(raw, "debounce_seconds", 2.0, 0.0, 10.0),
+        debounce_max_seconds=_as_float(raw, "debounce_max_seconds", 5.0, 0.0, 30.0),
+        block_stranger_private=_as_bool(raw, "block_stranger_private", True),
     )

@@ -42,5 +42,60 @@
     "description": "记录机器人自己的消息",
     "default": false,
     "hint": "一般不需要开：她自己的回复和主动消息会标成 is_bot，汇总时不参与事实提炼。"
+  },
+  "wake_on_poke": {
+    "type": "bool",
+    "description": "拍一拍唤醒",
+    "default": true,
+    "hint": "群友拍她一下就算在叫她。拍别人的不触发。"
+  },
+  "wake_on_name": {
+    "type": "bool",
+    "description": "叫名字唤醒",
+    "default": true,
+    "hint": "消息正文里出现名字表中的任意一个就算在叫她。只在正文里找，不看引用。"
+  },
+  "wake_names": {
+    "type": "list",
+    "items": {
+      "type": "string"
+    },
+    "description": "名字表",
+    "default": [
+      "鱼宝",
+      "大肥鱼",
+      "鱼呢"
+    ],
+    "hint": "叫这些名字算唤醒。逐行填写，也支持一行里用逗号分隔。别填太常见的词，否则群里天天误触发。"
+  },
+  "quota_enabled": {
+    "type": "bool",
+    "description": "每日唤醒配额",
+    "default": true,
+    "hint": "每个群友每天最多唤醒她几次，防止刷屏。主人、管理员和私聊不计入。"
+  },
+  "quota_daily": {
+    "type": "int",
+    "description": "每人每天次数",
+    "default": 5,
+    "hint": "超过后静默忽略（消息仍然会被记录），不会回一句\"今天叫太多啦\"。"
+  },
+  "debounce_seconds": {
+    "type": "float",
+    "description": "防抖窗口（秒）",
+    "default": 2.0,
+    "hint": "被叫到后先等这么久，期间又发的消息会并成一次回复。填 0 关闭防抖。"
+  },
+  "debounce_max_seconds": {
+    "type": "float",
+    "description": "最长等待（秒）",
+    "default": 5.0,
+    "hint": "连续发消息时窗口会一直往后顺延，但总等待不会超过这个上限。"
+  },
+  "block_stranger_private": {
+    "type": "bool",
+    "description": "屏蔽陌生人私聊",
+    "default": true,
+    "hint": "打开后，陌生人（既不是主人也不是管理员）的私聊不回复、不记录，避免垃圾消息进记忆。"
   }
 }

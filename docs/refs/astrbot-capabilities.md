@@ -376,3 +376,28 @@ req.extra_user_content_parts.append(TextPart(text=body).mark_as_temp())
   降级时才写 `system_prompt`（功能不受影响，只是缓存吃亏）。
 - 纯静态内容（如"你是 KahnBot 的 …"）可以留在 `system_prompt`，因为它不逐轮变。
 - 注记带上时间戳会逐轮变化，本来就不适合放系统提示。
+
+## 16. 图片消息链路（2026-11-12 实测确认）
+
+实测：SnowLuma 私聊发图 → 回复里描述了图中内容（“这只猫的表情好到位，汗都下来了”），
+说明 OpenCode Go 的 `deepseek-v4.1-flash` 确实能看图，模型能力里的 `image` 声明是对的，不需要改配置。
+
+事实（源码 + 落库数据双向确认）：
+
+- 适配器只把 **text 段**累加进 `message_str`（`core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py:231-252`）；
+  图片段走通用分支 `ComponentTypes[t](**m["data"])` 变成 `Image` 组件（`:405-422`）。
+  ⇒ **纯图消息 `event.message_str == ""`**，图只在 `event.message_obj.message` 里。
+- AstrBot 组请求时会补上文字占位：落库的会话里，这条 user 轮的第一个 text 是 `[图片]`，
+  后面跟 `[Image 1: original path <本地路径>]`（`core/utils/image_input.py:147-187` 生成），
+  再加一个真实的 `image_url`（base64 data URL，`core/provider/sources/openai_source.py:186-209`）。
+- 图片先下载到 `data/temp/media_image_<时间戳>_<随机>.jpg`；`core_lifecycle.py:319`
+  有 `temp_dir_cleaner_task` 定期清理，**不能指望它长期存在**。
+- 发给不支持视觉的模型时，`prepare_request_images(..., supports_image=False)` 会把视觉部分丢掉
+  （`image_input.py:147-148`），只留路径提示文字。
+
+对 KahnBot 的含义：
+
+- recorder 用 `event.message_str` 记录 ⇒ 纯图必然为空。占位符应与之对齐：
+  `message_str` 为空但含 `Image` ⇒ 记 `[图片]`，与模型在历史里看到的一致。
+- 若以后要让“窗口内单独发的图”也参与本次回复，必须在**收到时**把 `data/temp` 里的文件快照到插件目录，
+  否则请求时文件可能已被清理。

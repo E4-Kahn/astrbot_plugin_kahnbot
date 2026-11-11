@@ -54,13 +54,18 @@ astrbot_plugin_kahnbot/
   真机（`D:\workspace\Astrbot`，插件目录用 junction 链到仓库，`astrbot run`）插件加载无报错并建库成功
   （`data/plugin_data/astrbot_plugin_kahnbot/kahnbot.db`，四表 + 三索引 + `meta.schema_version=1` + WAL）。
 
-### M2 —— 唤醒与配额（用户能感知到"她活了"）
+### M2 —— 唤醒与配额（用户能感知到"她活了"）✅ 2026-11-12
 
 - `wake.py`：三种触发（@/前缀走原生、拍一拍、名字/关键词），命中后置 `event.is_at_or_wake_command = True`。
 - 拍一拍补 `message_str`，昵称用 `last_name_of(uid)` 兜底。
 - 配额（F12）：`wake_quota(user_id, day, count)`，管理员豁免，超限静默。
-- 覆盖：F10、F12。
-- 验收：`DEPLOYMENT.md` 验收表第 2~7 条全过。
+- 防抖（F23）：`_settle()` 静默窗口，`debounce_seconds` 可顺延、`debounce_max_seconds` 封顶；指令不排队。
+- 陌生人私聊（F24）：不记、不回、`stop_event()`；`owner_ids` 为空时自动不生效（否则会连主人一起挡）。
+- 覆盖：F10、F12、F23、F24。
+- 落地情况：`core/wake.py` 新增，`main.py` 的 catch-all 扩成"记录 → 唤醒判定 → 配额 → 防抖 → 放行"；
+  离线冒烟 `tests/smoke_m2.py`（唤醒判定/指令识别/占位符/配额/防抖与上限）通过；
+  真机 `astrbot run` 加载无报错，日志确认名字表与 `owner_ids` 未配置的告警。
+- 验收：`DEPLOYMENT.md` 验收表第 2~7 条全过（待群里实测）。
 
 ### M3 —— 情绪层（纯离线，不花一分钱）
 
