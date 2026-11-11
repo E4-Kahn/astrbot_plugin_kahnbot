@@ -69,6 +69,7 @@
 - 数据结构：见 `docs/refs/memory-design.md`（md 条目格式、SQLite 表结构、迁移方式）；F7/F9 定稿前为草案。
 - 唤醒与配额：见 `docs/refs/wake-design.md`（handler 顺序、`is_at_or_wake_command`、拍一拍、配额表）。
 - 部署：见 `docs/DEPLOYMENT.md`（从零部署 SnowLuma / AstrBot / 插件的清单，持续更新）。
+- 实现顺序：见 `docs/IMPLEMENTATION.md`（M1~M5 里程碑、模块划分、每阶段验收）。
 
 ## 7. 未决问题
 
@@ -88,3 +89,4 @@
 | 2026-11-11 | Q3/Q4 拍板：F7 定为 30 天半衰期 + pin、F9 定为选项 B；F5 补充"向量 + 字面混合检索"，确认复用 AstrBot Embedding Provider |
 | 2026-11-11 | 新增 F10 唤醒方式、F11 全量记录、F12 唤醒配额；配套 refs/wake-design.md |
 | 2026-11-11 | 身份键定为 `sender_id`（F8a 补充）；新增 F13 记录过滤；新建 docs/DEPLOYMENT.md 部署清单 |
+| 2026-11-11 | 新建 docs/IMPLEMENTATION.md：M1~M5 实现里程碑与模块划分 |
