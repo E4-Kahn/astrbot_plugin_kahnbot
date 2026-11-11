@@ -20,6 +20,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.event.filter import EventMessageType
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, StarTools
+from astrbot.core.star.filter.command import GreedyStr
 
 try:  # TextPart 是内容块，不在 message_components 里（capabilities §13）
     from astrbot.core.agent.message import TextPart
@@ -27,6 +28,7 @@ except Exception:  # pragma: no cover - 版本差异时退回 system_prompt 注�
     TextPart = None  # type: ignore[assignment]
 
 from .core import wake
+from .core.args import split_importance
 from .core.config import Config, load_config
 from .core.embeddings import EmbeddingClient, pack_vector
 from .core.emotion import Emotion
@@ -270,7 +272,7 @@ class KahnBot(Star):
         yield event.plain_result("\n".join(self.emotion.describe()))
 
     @kahn.command("recall")
-    async def kahn_recall(self, event: AstrMessageEvent, query: str = ""):
+    async def kahn_recall(self, event: AstrMessageEvent, query: GreedyStr = ""):
         """检索记忆（/kahn recall 我下周有什么安排）"""
         if self.store is None:
             yield event.plain_result("数据库不可用，请查看日志。")
@@ -278,9 +280,7 @@ class KahnBot(Star):
         if not self._is_admin(event.get_sender_id()):
             yield event.plain_result("只有主人或 AstrBot 管理员可以使用检索。")
             return
-        raw = (query or "").strip()
-        if not raw:
-            raw = (event.get_message_str() or "").split(maxsplit=2)[-1].strip()
+        raw = str(query or "").strip()
         if not raw:
             yield event.plain_result("用法：/kahn recall <问题或关键词>")
             return
@@ -360,7 +360,7 @@ class KahnBot(Star):
         yield event.plain_result("\n".join(lines))
 
     @kahn_memory.command("add")
-    async def kahn_memory_add(self, event: AstrMessageEvent, content: str = "", importance: int = 50):
+    async def kahn_memory_add(self, event: AstrMessageEvent, raw: GreedyStr = ""):
         """手动加一条记忆（M5 会由"记住…"自动触发）"""
         if self.store is None:
             yield event.plain_result("数据库不可用，请查看日志。")
@@ -369,14 +369,15 @@ class KahnBot(Star):
         if not self._is_owner(event, sender_id) and not self._is_admin(sender_id):
             yield event.plain_result("只有主人或 AstrBot 管理员可以添加记忆。")
             return
-        text = (content or "").strip()
-        if not text:
-            text = (event.get_message_str() or "").split(maxsplit=3)[-1].strip()
+        text, importance = split_importance(str(raw or ""))
+        text = text.strip()
         if not text:
             yield event.plain_result("用法：/kahn memory add <内容> [重要度 0-100]")
             return
         try:
-            fact_id = await self._remember(text, int(importance), event)
+            fact_id = await self._remember(
+                text, 50 if importance is None else importance, event
+            )
         except Exception:
             logger.exception("%s 写入记忆失败", PLUGIN_NAME)
             yield event.plain_result("写入记忆失败，请查看日志。")

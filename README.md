@@ -61,9 +61,9 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | `/kahn status` | 查看版本、运行状态、数据目录、已记录条数、今日唤醒次数、当前心情 |
 | `/kahn memory list [n]` | 查看最近 n 条流水（默认 10） |
 | `/kahn memory facts [n]` | 查看记忆条目（含重要度、是否已被取代 / 已归档） |
-| `/kahn memory add <内容> [重要度]` | 手动加一条记忆（仅主人 / 管理员；M5 前用它造数据） |
+| `/kahn memory add <内容> [重要度 N]` | 手动加一条记忆（仅主人 / 管理员；M5 前用它造数据）。内容可以带空格，"重要度 80" 写在最后 |
 | `/kahn memory forget <id>` | 删除一条流水（仅主人 / AstrBot 管理员） |
-| `/kahn recall <问句>` | 手动检索记忆，列出分数与来源（验证 M4 用） |
+| `/kahn recall <问句>` | 手动检索记忆，列出分数与来源（验证 M4 用）。问句可以带空格 |
 | `/kahn mood` | 查看九维状态、当前档位与最近一次情绪变化 |
 | `/kahn mood why` | 只看最近几次情绪变化的日志 |
 

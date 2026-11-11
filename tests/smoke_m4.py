@@ -19,6 +19,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT.parent))
 
+from astrbot_plugin_kahnbot.core.args import split_importance  # noqa: E402
 from astrbot_plugin_kahnbot.core.embeddings import pack_vector, unpack_vector  # noqa: E402
 from astrbot_plugin_kahnbot.core.injector import Injector, build_block  # noqa: E402
 from astrbot_plugin_kahnbot.core.retriever import Hit, Retriever, literal_score, tokens  # noqa: E402
@@ -195,8 +196,22 @@ def test_injector() -> None:
     print("injector ok")
 
 
+def test_split_importance() -> None:
+    assert split_importance("下周三上午去体检，记得空腹 重要度 80") == (
+        "下周三上午去体检，记得空腹",
+        80,
+    )
+    assert split_importance("她喜欢喝冰美式重要度70") == ("她喜欢喝冰美式", 70)
+    assert split_importance("重要性很高的一件事") == ("重要性很高的一件事", None)
+    assert split_importance("普通内容") == ("普通内容", None)
+    assert split_importance("写报告 importance: 120") == ("写报告", 100), "超范围应钳到 100"
+    assert split_importance("") == ("", None)
+    print("args ok")
+
+
 def main() -> None:
     base = tmpdir("m4")
+    test_split_importance()
     test_tokens()
     test_store_roundtrip(tmpdir("m4_store"))
     test_visibility_and_filters(tmpdir("m4_filter"))
