@@ -1,5 +1,11 @@
 # 更新日志
 
+## [Unreleased]
+
+### 变更
+
+- 仓库与插件目录更名为 `astrbot_plugin_kahnbot`，与插件标识符保持一致。原先仓库目录名为 `kahnbot`，与 `metadata.yaml` 的 `name` 不一致，会导致 WebUI 安装与手动 clone 得到两个不同目录、两份不同配置。
+
 ## [0.1.0] - 2026-11-11
 
 ### 新增

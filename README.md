@@ -1,6 +1,6 @@
 # KahnBot
 
-KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/kahnbot](https://github.com/E4-Kahn/kahnbot)）。
+KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](https://github.com/E4-Kahn/astrbot_plugin_kahnbot)）。
 
 > 当前处于 **脚手架阶段**：插件加载、配置注入、日志、数据目录已经打通，`/kahn` 可以查看运行状态。
 > 具体功能在 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) 里逐条定稿后实现。
@@ -13,16 +13,16 @@ KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/kahnbot](https://github.com/
 
 ## 安装
 
-方式一：AstrBot WebUI → 插件 → 安装插件 → 填仓库地址 `https://github.com/E4-Kahn/kahnbot`
+方式一：AstrBot WebUI → 插件 → 安装插件 → 填仓库地址 `https://github.com/E4-Kahn/astrbot_plugin_kahnbot`
 
 方式二：手动 clone 到插件目录
 
 ```bash
 cd AstrBot/data/plugins
-git clone https://github.com/E4-Kahn/kahnbot
+git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 ```
 
-装好后在 WebUI 插件页重载插件即可。插件标识符是 `astrbot_plugin_kahnbot`，目录名是 `kahnbot`。
+装好后在 WebUI 插件页重载插件即可。插件标识符与目录名统一为 `astrbot_plugin_kahnbot`，配置文件为 `astrbot_plugin_kahnbot_config.json`。
 
 ## 配置
 
@@ -42,7 +42,7 @@ git clone https://github.com/E4-Kahn/kahnbot
 ## 目录结构
 
 ```text
-kahnbot/
+astrbot_plugin_kahnbot/
 ├── main.py              # 插件入口，继承 Star 的类会被自动识别
 ├── metadata.yaml        # 插件元数据（名称/版本/作者/仓库）
 ├── _conf_schema.json    # WebUI 配置表单
@@ -56,7 +56,7 @@ kahnbot/
 
 ## 开发
 
-1. 把仓库放到 `AstrBot/data/plugins/kahnbot`（或在插件目录里直接开发）。
+1. 把仓库放到 `AstrBot/data/plugins/astrbot_plugin_kahnbot`（或在插件目录里直接开发）。
 2. 改完 `main.py` 后在 WebUI 插件页点「重载」，或者重启 AstrBot。
 3. 数据目录：`data/plugin_data/astrbot_plugin_kahnbot/`，用 `StarTools.get_data_dir()` 获取。
 
