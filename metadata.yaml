@@ -11,6 +11,6 @@ desc: |
 version: 0.1.0
 author: E4-Kahn
 repo: https://github.com/E4-Kahn/astrbot_plugin_kahnbot
-astrbot_version: ">=4.24.0"
+astrbot_version: ">=4.29.4"
 tags:
   - kahnbot

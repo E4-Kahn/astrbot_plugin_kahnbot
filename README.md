@@ -9,7 +9,7 @@ KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](http
 
 ## 环境要求
 
-- AstrBot `>= 4.24.0`
+- AstrBot `>= 4.29.4`
 - Python `>= 3.12`（AstrBot 自带要求）
 - 无额外第三方依赖
 

@@ -42,6 +42,7 @@
 - 新增 `docs/refs/`：`astrbot-capabilities.md`（AstrBot 4.29.4 能力核对，含踩坑）、`memory-design.md`（记忆数据与检索设计）、`wake-design.md`（唤醒与配额设计）、`emotion-design.md`（九维情绪、心跳、事实分层、主动说话）、`dsh-memory-keeper.md` 与 `astrbot_plugin_fish_heart.md`（参考插件调研）、`deployment.md`（部署评审记录）。
 - 新增 `docs/IMPLEMENTATION.md`（M1–M6 里程碑）与 `docs/DEPLOYMENT.md`（从零部署清单，含 embedding / 会话模型配置）。
 - 逐条核对文档里的源码引用（AstrBot 4.29.4 / SnowLuma），修正失效行号与错误的 `TextPart` 导入路径。
+- 兼容下限抬到 AstrBot `>= 4.29.4`（只在 4.29.4 实测过）；补齐「背景与目标」；新增「工作区洁净」约定（测试产物只落 `.smoke_tmp/` 或系统临时目录）。
 
 ## [0.1.0] - 2026-11-11
 
