@@ -77,12 +77,15 @@ CREATE TABLE fact_index (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     fact_id     TEXT    NOT NULL UNIQUE, -- md 行的稳定标识
     text        TEXT    NOT NULL,
+    hash        TEXT    NOT NULL,        -- md5(text.strip())，精确去重
     scope       TEXT    NOT NULL,        -- owner / group:<id> / private
-    visibility  TEXT    NOT NULL DEFAULT 'owner',  -- F9 定稿后细化
+    visibility  TEXT    NOT NULL DEFAULT 'private', -- F9：private / public
     created_ts  INTEGER NOT NULL,
     last_hit_ts INTEGER,                 -- F7 用：被检索到的最后时间
-    pinned      INTEGER NOT NULL DEFAULT 0
+    pinned      INTEGER NOT NULL DEFAULT 0,
+    archived    INTEGER NOT NULL DEFAULT 0  -- F7：已归档则默认不参与检索
 );
+CREATE UNIQUE INDEX idx_fact_hash ON fact_index(hash);
 
 CREATE TABLE meta (
     key   TEXT PRIMARY KEY,
@@ -113,6 +116,42 @@ CREATE TABLE meta (
 4. 失败只记日志，不阻塞、不重试轰炸。
 
 > 去重与节流是这块的主要风险：汇总过频会写出大量低价值条目。
+
+**输入**（`message` 表按 `ts` 升序，只取 `last_summary_ts` 之后的）：
+
+```
+[11-11 20:31] 主人(10001)：我下周三去杭州出差
+[11-11 20:33] 群友(20002)：杭州最近降温
+```
+
+**提示词要点**（模型用 AstrBot 当前默认会话模型，或配置项 `summary_provider_id` 指定）：
+
+- 只抽"长期有用"的事实：偏好、计划、关系、承诺、关键日期、身份信息。
+- 不要抽：寒暄、情绪、一次性的提问、别人的转述（除非主人确认）。
+- 每条必须能独立读懂（不要出现"他/那个"这类指代）。
+- 输出 JSON 数组，元素 `{"text": "...", "kind": "plan|preference|relation|fact", "confidence": 0-1}`；没有可记的就输出 `[]`。
+- **不许编造**：只能写原文里出现过的信息；拿不准就不写。
+
+**去重**：
+
+1. 精确：`md5(text.strip())` 与 `fact_index.hash` 比对。
+2. 近似：与已有条目算余弦，`> 0.92` 视为重复（保留旧的，更新 `last_hit_ts`）。
+3. 单次写入上限（默认 10 条），超出按 `confidence` 截断——防一次汇总刷屏。
+
+**成本**：一次汇总 = 1 次输入（约 2–4k token）+ 1 次输出（几百 token）；默认 6 小时一次，一天 4 次。
+`confidence < 0.5` 的条目不入库，只留在流水里。
+
+### 5.3 "记住…" 怎么被识别（Q8，待拍板）
+
+`catch-all` 只写库、**从不调 LLM**（F11），所以未唤醒状态下说"记住 X"不会经过模型。三条路：
+
+| 方案 | 机制 | 代价 |
+| --- | --- | --- |
+| A. 正则直存 | catch-all 里匹配 `记住\|记一下\|别忘了` → 直接落库 | 零成本，但会误存（"记住带伞"这类自言自语） |
+| B. 唤醒后工具调用 | 被唤醒时才让模型调 `remember_fact` | 准确，但主人必须同时 @/叫名字 |
+| C. A + 唤醒时确认 | 正则先存草稿，下次唤醒时让模型确认/改写 | 折中，多一次交互 |
+
+倾向 **B**（准确优先），A 作为可选开关。
 
 ## 6. 检索（F5）
 
