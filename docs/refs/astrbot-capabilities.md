@@ -6,10 +6,10 @@
 
 ## 0. 版本基线
 
-- `metadata.yaml` 当前声明 `astrbot_version: ">=4.24.0"`。
+- `metadata.yaml` 当前声明 `astrbot_version: ">=4.29.4"`（2026-11-12 从 `>=4.24.0` 抬起）。
 - 实测环境是 **4.29.4**（`astrbot --version`）。
-- ⚠️ 本文所有接口都在 4.29.4 上核对过，**未逐一确认 4.24.0 是否存在**。
-  一旦 KahnBot 用到下表任一项，`astrbot_version` 下限应抬到实测可用版本（待办：查 changelog 定版本）。
+- 本文所有接口都在 4.29.4 上核对过，**未逐一确认 4.24.x 是否存在**——这也正是把下限抬到
+  4.29.4 的原因：只对核对过的版本承诺兼容。
 
 ## 1. 钩子全集（`core/star/register/star_handler.py`）
 

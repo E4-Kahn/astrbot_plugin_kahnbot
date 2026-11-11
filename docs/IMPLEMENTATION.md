@@ -102,8 +102,13 @@ astrbot_plugin_kahnbot/
   `recall_memory` 留到确有必要再加）；`/kahn recall <问句>` 是手动验证入口。
 - 注入位置：`req.extra_user_content_parts` 追加 `TextPart(...).mark_as_temp()`，**不写 system_prompt**
   （F14，见 refs/astrbot-capabilities.md 第 15 节）；拿不到 `TextPart` 时才退回 system_prompt。
-- 写入（本里程碑只做最小实现，供检索验证）：`/kahn memory add <内容> [重要度]` → md + 索引 + 向量；
-  「记住…」自动识别、LLM 打分、汇总提炼留到 M5。
+- 写入（本里程碑只做最小实现，供检索验证）：`/kahn memory add <内容> [重要度 N]` → md + 索引 + 向量；
+  「记住…」自动识别、LLM 打分、汇总提炼留到 M5。正文参数用 `GreedyStr` 整段接收
+  （AstrBot 按空格切位置参数，普通 `str` 会把带空格的正文切碎），"重要度 N"从末尾剥离，
+  见 `core/args.py::split_importance`。
+- 指令不进流水：catch-all 原本连 `/kahn …` 也记，`/` 前缀又已被 `waking_check` 剥掉，
+  看起来像"主人说了这句话"；现在按 `activated_handlers` 里的 filter 类型识别指令，
+  记录与情绪推进都跳过（`core/recorder.py`、`core/wake.py::is_command_event`）。
 - 覆盖：F5、F9、F14、F15。
 - 落地情况：`core/embeddings.py`、`core/retriever.py`、`core/injector.py` 新增；`Store` 的
   `fact_index` 加 `kind/importance/superseded_by/due_ts/embedding` 五列；离线冒烟
@@ -113,13 +118,26 @@ astrbot_plugin_kahnbot/
 
 ### M5 —— 长期记忆与事实分层
 
-- 显式"记住…"解析 → `facts.md` 追加 + `fact_index` 插入 + 默认 `pinned=1`。
-- `trust.py` + `briefing.py`：汇总输出带 `source: owner|third_party`；只有 `owner` 升格进
-  `facts.md`（可触发提醒），`third_party` 落 `observed.md`（注入时标注"未必属实"、排序 ×0.6）。
-- 老化（F7）：30 天未命中，排序乘 `0.5 ** (天数/30)`；归档写入 `archive.md`，默认不参与检索。
-- 覆盖：F3、F4、F7、F21。
+设计见 [`refs/memory-design.md`](refs/memory-design.md)（2026-11-12 定稿）。
+
+- 写入（F4）：三层判定——唤醒层（私聊常驻 / 群里被叫到才进）→ 句式层（"记住"在句首或前 6 字，
+  且不是疑问、应答、转述）→ 回执层（回一句"好，我记下了"）。**不做形态闸门**，也不用 LLM 判断
+  "是不是要我记"；"别忘了 / 提醒我"同样算记住，并解析出 `due_ts`。
+- 重要度（F7）：写入时让 LLM 给 0–100 打分（拿不到默认 50），只影响排序；
+  `30 天未命中且重要度 < 60` 才归档，`≥60` 不归档但仍参与时间衰减。取消原来的 `pinned` 布尔位。
+- 已被取代（§8.3）：同 `kind` 且余弦 >0.92 时，旧条目标 `〔已被取代 by #新id〕`，默认不再检索。
+- 分层（F21）：`owner` → `facts.md`（可触发提醒）；`observed` → `observed.md`
+  （注入标"未必属实"、排序 ×0.6、永不提醒）；`raw` 只留流水。
+- 汇总：定时从 `message` 表取增量 → LLM 输出 `{"text","kind","confidence"}` → md5 精确去重 +
+  余弦 >0.92 近似去重 → 单次上限 10 条、`confidence < 0.5` 丢弃。**不设内容边界**
+  （单实例、私聊 + 4~5 人小群，群里的梗被提炼成 `observed` 就提炼）。
+- 提醒（F16 的确定路）：落 `due_ts` + `schedule.md` → `context.cron_manager.add_basic_job()` 挂自己的
+  handler → 到点发一句并清 `due_ts`。坑：basic job 的 handler 只在内存，**重启后核心会跳过它**
+  （`Skip scheduling basic cron job … due to missing handler`），启动时要按 `fact_index.due_ts` 重新挂；
+  `platform == "cron"` 的 `CronMessageEvent` 必须挡在 catch-all 之外。
+- 覆盖：F3、F4、F7、F16（确定路）、F21。
 - 验收：群里有人说"明天是管理员的生日" → 只进 `observed.md`，次日**不会**触发提醒；
-  主人说"下周三体检" → 进 `facts.md`，次日能提醒。
+  主人说"下周三体检" → 进 `facts.md`，到点能提醒；重启后提醒仍然有效。
 
 ### M6 —— 主动说话与收尾
 
@@ -171,7 +189,35 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
 - [ ] 汇总用什么模型（跟随 AstrBot 默认 provider 还是单独指定）。
 - [x] `/kahn` 指令的最终形态：指令组 + `status` / `memory list|forget` / `mood [why]` 已落地。
 - [x] `/kahn memory forget` 是否限管理员：限主人或 AstrBot 管理员。
-- [ ] "记住…"识别方式（Q8：正则直存 / 唤醒后工具调用 / 折中）。
+- [x] "记住…"识别方式（Q8）：三层判定，形态闸门本轮不做（见 M5）。
 - [ ] 情绪参数（base/rate/阈值）初值，M3 跑一周后校准。
 - [ ] 是否需要 WebUI 配置页（AstrBot 插件配置页自动由 schema 生成，够用则不做；`/kahn mood` 已覆盖查看需求）。
-- [ ] `astrbot_version` 下限：只在 4.29.4 上实测过，要不要从 `>=4.24.0` 抬高。
+- [x] `astrbot_version` 下限：已抬到 `>=4.29.4`。
+## 7. 当前状态与交接（2026-11-12）
+
+给"换一台机器接着写"用的最小上下文。
+
+- **做到哪了**：M1 数据层、M2 唤醒与配额、M3 情绪层、M4 检索与注入全部落地并跑过离线冒烟；
+  本地提交到 `32dbb6b`（M4 + 两处修复），动手前先 `git log --oneline` 确认要不要 push。
+- **下一步**：M5 按"写入 → 汇总 → 提醒"三小步做；第一小步（"记住…"识别 + 重要度打分）不依赖
+  别的东西，写完用 `/kahn memory facts` 就能验证。
+- **跑测试**（不需要启动 AstrBot，用 AstrBot 自带的 Python）：
+
+  ```powershell
+  & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m1.py
+  & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m2.py
+  & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m3.py
+  & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m4.py
+  ```
+
+  期望最后一行都是 `ALL OK`。临时目录 `.smoke_tmp/` 已 gitignore。
+- **真机验证**：插件目录用 junction 链到 `AstrBot\data\plugins\astrbot_plugin_kahnbot`，
+  改代码后**必须重启** `astrbot run`（不带 `--reload` 不会热更）。
+- **数据在哪**：`AstrBot\data\plugin_data\astrbot_plugin_kahnbot\` 下有 `kahnbot.db`（流水 + 记忆索引 + 配额）、
+  `state.json`（情绪）、`memory\facts.md`（记忆正文）。删库即回到零状态。
+- **最容易踩的三件事**：① 指令的 `/` 前缀在 `waking_check` 就被剥掉了，别靠字符串猜指令；
+  ② 指令正文要用 `GreedyStr`，否则带空格的内容被切碎；③ 注入走 `extra_user_content_parts` +
+  `mark_as_temp()`，写 system_prompt 会毁掉前缀缓存。
+- **文档看哪本**：需求与状态 → `REQUIREMENTS.md`；里程碑 → 本文件；记忆设计 → `refs/memory-design.md`；
+  唤醒 → `refs/wake-design.md`；情绪 → `refs/emotion-design.md`；部署与模型 → `DEPLOYMENT.md`；
+  AstrBot 内部机制核对 → `refs/astrbot-capabilities.md`。

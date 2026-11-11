@@ -112,9 +112,12 @@ astrbot_plugin_kahnbot/
 
 ## 开发
 
-1. 把仓库放到 `AstrBot/data/plugins/astrbot_plugin_kahnbot`（或在插件目录里直接开发）。
-2. 改完 `main.py` 后在 WebUI 插件页点「重载」，或者重启 AstrBot。
+1. 把仓库放到 `AstrBot/data/plugins/astrbot_plugin_kahnbot`（或在插件目录里直接开发；
+   Windows 上可以用 `mklink /J` 做目录联接，改代码不用来回拷）。
+2. 改完代码后在 WebUI 插件页点「重载」，或者重启 AstrBot（`astrbot run` 不带 `--reload` 不会热更）。
 3. 数据目录：`data/plugin_data/astrbot_plugin_kahnbot/`，用 `StarTools.get_data_dir()` 获取。
+4. 离线冒烟：`python tests/smoke_m1.py` … `smoke_m4.py`，不需要启动 AstrBot。
+   环境、交接状态与常见坑见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) 第 7 节。
 
 ## 更新日志
 
