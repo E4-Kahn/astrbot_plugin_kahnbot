@@ -158,6 +158,24 @@
     "default": true,
     "hint": "写入时按关键词猜这条属于计划/偏好/关系/纪念日（正则，不调模型）。类型只影响两件事：纪念日按年提醒、生气时先不翻「暖」的记忆。猜错了不影响记忆本身。"
   },
+  "segmented_reply": {
+    "type": "bool",
+    "description": "分段发送（一句句发）",
+    "default": true,
+    "hint": "把模型的一整段回复拆成 1~3 条，按字数估打字间隔逐条发。短回复（不到 8 字）、长内容（超过 300 字）和代码块不拆。开启后请把 AstrBot 全局的「分段回复」关掉，否则会被拆两遍。"
+  },
+  "segmented_max_bubbles": {
+    "type": "int",
+    "description": "一轮最多几条",
+    "default": 3,
+    "hint": "默认 3。条数越多越像在聊天，也越容易被当成刷屏；群里建议 2。生气或回避时固定只发 1 条，不受这里影响。"
+  },
+  "segmented_typing": {
+    "type": "bool",
+    "description": "私聊显示「正在输入」",
+    "default": true,
+    "hint": "第一条和第二条之间让 QQ 显示「正在输入」（OneBot 的 set_input_status）。需要协议端支持（NapCat / Lagrange 支持）；不支持时只记一条日志，不会报错。群里没有这个能力。"
+  },
   "remember_enabled": {
     "type": "bool",
     "description": "识别「记住…」",

@@ -149,30 +149,28 @@ OpenCode Go 要求请求带 **`x-opencode-session`**（每个会话一个稳定 
 - 出处：<https://opencode.ai/docs/console/go/> 的 "Where can I use it?" 一节（请求头要求）。
   其中 "Endpoints" 表格里的地址按实测判断是错的。
 
-## 7. 部署前必须关掉的开关（否则提醒会重复）
+## 7. 部署前必须关掉的开关（否则提醒会重复、回复会被拆两遍）
 
 KahnBot 的提醒走自己的 basic job：到点只发一句话，零 token。AstrBot 4.29.4 另有一个
 "让模型自己排任务"的能力（`future_task` 工具），开启后模型会顺手把你说的"十分钟后提醒我"
 再排一遍，**同一条提醒会发两次**（2026-11-12 真机实测：12:34 收到插件与 agent 各一条）。
 
-必须关掉这一项：
+必须关掉这两项：
 
-| 配置路径（`data/cmd_config.json`） | 值 |
-| --- | --- |
-| `provider_settings.proactive_capability.add_cron_tools` | `false` |
+| 配置路径（`data/cmd_config.json`） | 值 | 原因 |
+| --- | --- | --- |
+| `provider_settings.proactive_capability.add_cron_tools` | `false` | 否则同一条提醒会被模型再排一遍，发两次 |
+| `platform_settings.segmented_reply.enable` | `false` | 插件从 0.4.0 起自己拆条、自己控制节奏；原生分段再切一遍会变成碎句 |
 
-WebUI 位置：**配置 → 提供商（Provider）→ 主动能力 / Proactive Capability → 允许模型创建定时任务**，取消勾选。
+WebUI 位置：
+- `add_cron_tools`：**配置 → 提供商（Provider）→ 主动能力 / Proactive Capability → 允许模型创建定时任务**，取消勾选；
+- `segmented_reply`：**配置 → 平台（Platform）→ 分段回复**，关闭。
 
-- 插件每次启动都会检查它；开着就会在日志里打一条 WARNING，提醒你关掉。
+- 插件每次启动都会检查 `add_cron_tools`；开着就会在日志里打一条 WARNING，提醒你关掉。
 - 改完需要重启 AstrBot（或重载配置）才生效。
 - 如果确实想让模型自己排任务（例如别的插件依赖 `future_task`），那就把插件配置
   `reminder_enabled` 关掉，只留一条路——两套同时开一定会重复。
-
-另外一项建议保持默认：
-
-| 配置路径 | 值 | 原因 |
-| --- | --- | --- |
-| `platform_settings.segmented_reply.enable` | `false` | 分段回复后续由插件自己控制条数与节奏；先开原生分段会和插件的发送逻辑打架。 |
+- 分段发送想要回原生长段，把插件配置 `segmented_reply` 关掉、再开原生分段即可。
 
 ## 8. 联调验收清单
 

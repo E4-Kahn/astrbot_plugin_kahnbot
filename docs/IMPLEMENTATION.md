@@ -1,6 +1,6 @@
 # 实现计划（实施里程碑）
 
-> 状态：v7.2，2026-11-12；M1~M7 全部落地并跑过离线冒烟，0.3.1 / 0.3.2 为真机测试后的修复批次。
+> 状态：v8，2026-11-12；M1~M8 全部落地并跑过离线冒烟，0.3.1 / 0.3.2 为真机测试后的修复批次，M8 = 0.4.0。
 > 需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
 > 设计依据 [`refs/memory-design.md`](refs/memory-design.md)、[`refs/wake-design.md`](refs/wake-design.md)
 > 与 [`refs/emotion-design.md`](refs/emotion-design.md)。
@@ -41,8 +41,9 @@ astrbot_plugin_kahnbot/
 │   ├── llm.py              # 打分与汇总用的模型客户端 + JSON 抽取 ✅
 │   ├── summarizer.py       # 定时汇总：流水 → LLM 提炼 → 落条目 ✅
 │   ├── reminder.py         # cron basic job 挂/摘 + 重启恢复 + 兜底 ✅
+│   ├── segments.py         # 分段发送：拆条规则 + 打字间隔 ✅
 │   └── proactive.py        # 主动说话：情绪概率路、闸门、回写历史 ✅
-├── tests/                  # 离线冒烟（不启动 AstrBot）✅ smoke_m1 ~ smoke_m7
+├── tests/                  # 离线冒烟（不启动 AstrBot）✅ smoke_m1 ~ smoke_m8
 └── _conf_schema.json
 ```
 
@@ -256,6 +257,31 @@ astrbot_plugin_kahnbot/
   模型不给/超时退回 `compose_phrase`（「提醒主人一下：关火」）。
   到点仍然不经过模型（读 `schedule.md` 直接发），保持 basic job 的零成本。
 
+### M8 —— 分段发送（0.4.0）✅ 2026-11-12
+
+**目标**：不再一长段砸过去，而是像人一样一条条发；条数与节奏由插件决定，不依赖 AstrBot 原生分段。
+
+- **为什么不用原生**：4.29.4 的 `ResultDecorateStage` 只按标点机械切、没有条数上限、间隔固定
+  1.5~3.5 秒，而且是全局开关，对所有插件的回复生效。原生分割发生在 `on_decorating_result`
+  之后、发送之前——所以钩子里自己 `clear_result()` 再发，就能完全接管。
+- **拆条规则**（`core/segments.py::split_bubbles`）：总长 < 8 字不拆（"嗯""知道啦"）；
+  > 300 字或含代码块不拆；换行是模型自己选的断点，按段保留；同一行按 `。！？!?~…；` 切，
+  短于 4 字的句子并到下一句；超过 `segmented_max_bubbles` 的并进最后一条，不丢字。
+- **节奏**：`bubble_delay = clamp(0.7 + 0.09 × 字数, 0.7, 3.5) + jitter(0~0.4)` 秒，
+  对齐参考项目 dsh-aurabot-qq 的"约每秒 9 字"。
+- **心情调制**：`_bubble_limit()` 在 angry / avoidant 时返回 1——生气时话短，一条说完。
+- **正在输入**：`_show_typing` 只在私聊调 OneBot `set_input_status`（`event_type=1`）；
+  协议端不支持时只记一条 debug 并永久跳过。群聊没有这个能力。
+- **安全边界**：只处理 `platform == "aiocqhttp"` 且 `event.get_extra("provider_request")` 存在的
+  结果——指令结果是控制流，不拆；带图片/语音/引用组件的回复不拆。引用与 at 设置（
+  `platform_settings.reply_with_quote` / `reply_with_mention`）手动挂到第一条上。
+- **历史不受影响**：assistant 轮由 agent 层在装饰钩子之前写好，拆条不改变历史内容，
+  下一轮看到的仍是完整的一句。
+- 配置：`segmented_reply`、`segmented_max_bubbles`（1~5）、`segmented_typing`。
+  部署侧必须关掉原生 `platform_settings.segmented_reply.enable`，见 `DEPLOYMENT.md` 第 7 节。
+- 验收：`tests/smoke_m8.py` 通过；真机上一条 3 句的回复变成 2~3 条，间隔随长度变化，
+  私聊能看到"正在输入"，群里没有。
+
 ## 3. 依赖与顺序
 
 ```
@@ -305,8 +331,8 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
 给"换一台机器接着写"用的最小上下文。
 
 - **做到哪了**：M1 数据层、M2 唤醒与配额、M3 情绪层、M4 检索与注入、M5 长期记忆与事实分层、
-  M6 主动说话与回避档、M7 情绪与上下文进对话，全部落地并跑过 `smoke_m1~m7`；版本 `0.3.2`
-  （0.3.1 修真机崩溃、加整机重置；0.3.2 提醒不占日限、写入剥指令语、文案交给模型）。动手前先
+  M6 主动说话与回避档、M7 情绪与上下文进对话、M8 分段发送，全部落地并跑过 `smoke_m1~m8`；版本 `0.4.0`
+  （0.3.1 修真机崩溃、加整机重置；0.3.2 提醒不占日限、写入剥指令语、文案交给模型；M8 自己拆条发送）。动手前先
   `git log --oneline` 确认要不要 push。
 - **下一步（可选）**：真机跑一周校准情绪参数（`BASE` / `RATES` / 阈值 / 主动说话概率 / `_chance` 权重）；
   补 `md ↔ fact_index` 一致性校验命令；`/kahn memory expose <id>`（memory-design §9）。
@@ -320,6 +346,7 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
   & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m5.py
   & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m6.py
   & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m7.py
+  & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m8.py
   ```
 
   期望最后一行都是 `ALL OK`。临时目录 `.smoke_tmp/` 已 gitignore。
@@ -330,7 +357,7 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
 - **数据在哪**：`AstrBot\data\plugin_data\astrbot_plugin_kahnbot\` 下有 `kahnbot.db`（流水 + 记忆索引 + 配额）、
   `state.json`（情绪）、`memory\facts.md`（owner 层正文）、`memory\observed.md`（见闻层）、
   `memory\schedule.md`（提醒排期）。删库即回到零状态。
-- **最容易踩的十二件事**：① 指令的 `/` 前缀在 `waking_check` 就被剥掉了，别靠字符串猜指令；
+- **最容易踩的十三件事**：① 指令的 `/` 前缀在 `waking_check` 就被剥掉了，别靠字符串猜指令；
   ② 指令正文要用 `GreedyStr`，否则带空格的内容被切碎；③ 注入走 `extra_user_content_parts` +
   `mark_as_temp()`，写 system_prompt 会毁掉前缀缓存；④ 跑 `astrbot run` 时把输出重定向到
   `$env:TEMP\astrbot-run.log`，不要写 `D:\workspace` 根（已经踩过两次，见前文"工作区洁净"）；
@@ -343,7 +370,10 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
   ⑩ `<emotion>` / `<memory>` / `<recent_chat>` 三块都是临时内容，必须 `mark_as_temp()`，
   否则会把它们写进会话历史、越滚越长；⑪ 提醒**不占**主动额度（0.3.2 起），
   `proactive_daily_limit` 只拦主动搭话，别把提醒也算进去；
-  ⑫ 提醒文案必须**先写 `schedule.md` 再挂 job**（`_finalize_reminder` 的顺序），反了就会把旧模板念出去。
+  ⑫ 提醒文案必须**先写 `schedule.md` 再挂 job**（`_finalize_reminder` 的顺序），反了就会把旧模板念出去；
+  ⑬ 分段发送必须在 `on_decorating_result` 里 `clear_result()` 后自己发，并且**关掉原生**
+  `platform_settings.segmented_reply.enable`——两边同时开会被切两遍；指令结果没有
+  `provider_request`，正好可以靠它区分"模型回复"和"控制流"。
 - **文档看哪本**：需求与状态 → `REQUIREMENTS.md`；里程碑 → 本文件；记忆设计 → `refs/memory-design.md`；
   唤醒 → `refs/wake-design.md`；情绪 → `refs/emotion-design.md`；部署与模型 → `DEPLOYMENT.md`；
   AstrBot 内部机制核对 → `refs/astrbot-capabilities.md`。

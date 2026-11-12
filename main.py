@@ -2,21 +2,22 @@
 
 这里只做三件事：读配置、建数据层、注册 handler / 指令；业务逻辑都在 `core/` 下。
 
-当前进度：M7（情绪与上下文进对话）之后的 0.3.2：提醒不再挤占主动说话的额度，
-写入时剥掉"提醒我 / 10 分钟后"这类指令语，到点要说的话由打分那次调用顺手写出。
+当前进度：M8（分段发送）：回复拆成 1~3 条，按字数估打字间隔，私聊显示"正在输入"，
+不再依赖 AstrBot 原生的机械分段。
 """
 
 from __future__ import annotations
 
 import asyncio
 import datetime
+import random
 import time
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.event.filter import EventMessageType
-from astrbot.api.message_components import Plain
+from astrbot.api.message_components import At, Plain, Reply
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.core.star.filter.command import GreedyStr
@@ -41,13 +42,14 @@ from .core.recorder import Recorder
 from .core.reminder import ReminderService, resolve_tz
 from .core.reset import reset_all
 from .core.retriever import Retriever
+from .core.segments import JITTER, bubble_delay, split_bubbles
 from .core.state import load_state, save_state
 from .core.store import Store, now_ts
 from .core.summarizer import Summarizer
 from .core.when import format_due
 
 PLUGIN_NAME = "astrbot_plugin_kahnbot"
-PLUGIN_VERSION = "0.3.2"
+PLUGIN_VERSION = "0.4.0"
 MAX_PENDING_TEXTS = 8
 
 
@@ -341,6 +343,89 @@ class KahnBot(Star):
         else:  # pragma: no cover - 只在旧版本 AstrBot 上走这里
             req.system_prompt = (req.system_prompt or "") + "\n" + text
 
+    # ------------------------------------------------------------------ 分段发送
+
+    @filter.on_decorating_result(priority=1000)
+    async def segment_reply(self, event: AstrMessageEvent) -> None:
+        """把模型的一整段回复拆成几条，按打字节奏发出去（M8）。
+
+        原生 segmented_reply 只按标点切、没有条数上限、间隔固定；这里自己
+        拆自己发，条数与节奏都由我们决定，原生开关应该保持关闭。
+        """
+        if not self.cfg.segmented_reply:
+            return
+        if (event.get_platform_name() or "") != "aiocqhttp":
+            return
+        # 只处理模型回复：指令结果是控制流，不该被拆成好几条
+        if event.get_extra("provider_request") is None:
+            return
+        result = event.get_result()
+        if result is None or not result.chain:
+            return
+        if not all(isinstance(comp, Plain) for comp in result.chain):
+            return  # 带图片、语音、引用等的回复不拆
+
+        text = "".join(comp.text for comp in result.chain).strip()
+        bubbles = split_bubbles(text, max_bubbles=self._bubble_limit())
+        if len(bubbles) <= 1:
+            return
+
+        event.clear_result()  # 不再让 respond stage 发原文
+        header = self._reply_header(event)
+        for index, bubble in enumerate(bubbles):
+            chain = MessageChain([header, Plain(bubble)]) if index == 0 and header else MessageChain([Plain(bubble)])
+            try:
+                await event.send(chain)
+            except Exception:
+                logger.exception("%s 分段发送失败", PLUGIN_NAME)
+                return
+            if index < len(bubbles) - 1:
+                await self._show_typing(event)
+                await asyncio.sleep(bubble_delay(bubble, jitter=random.uniform(0.0, JITTER)))
+
+        if self.cfg.debug:
+            logger.debug("KahnBot 分 %s 条发送：%s", len(bubbles), " / ".join(bubbles))
+
+    def _bubble_limit(self) -> int:
+        """生气或回避时只发一条：话少、气短，才像在闹别扭。"""
+        if self.emotion.mode in ("angry", "avoidant"):
+            return 1
+        return self.cfg.segmented_max_bubbles
+
+    def _reply_header(self, event: AstrMessageEvent):
+        """沿用 AstrBot 的引用 / at 设置，只是把它挂到第一条上。"""
+        config = self.context.get_config()
+        settings = (config or {}).get("platform_settings") or {}
+        header = []
+        if settings.get("reply_with_quote"):
+            message_id = getattr(getattr(event, "message_obj", None), "message_id", None)
+            if message_id:
+                header.append(Reply(id=message_id))
+        if settings.get("reply_with_mention") and not event.is_private_chat():
+            header.append(At(qq=event.get_sender_id(), name=event.get_sender_name()))
+        return header
+
+    async def _show_typing(self, event: AstrMessageEvent) -> None:
+        """私聊里让 QQ 显示"正在输入"。不支持的平台/协议端静默跳过。"""
+        if not self.cfg.segmented_typing or not event.is_private_chat():
+            return
+        if getattr(self, "_typing_supported", True) is False:
+            return
+        bot = getattr(event, "bot", None)
+        if bot is None or not hasattr(bot, "call_action"):
+            return
+        try:
+            await bot.call_action(
+                "set_input_status",
+                user_id=int(event.get_sender_id()),
+                event_type=1,
+            )
+        except Exception:
+            # 协议端不认这个扩展 API 时只报一次，之后不再尝试
+            self._typing_supported = False
+            if self.cfg.debug:
+                logger.debug("%s 协议端不支持 set_input_status，跳过「正在输入」", PLUGIN_NAME)
+
     # ------------------------------------------------------------------ 指令
 
     @filter.command_group("kahn")
@@ -370,7 +455,8 @@ class KahnBot(Star):
             f"回避：{'正在躲，' + self._fmt_ts(int(self.emotion.state.get('avoid_until') or 0)) + ' 前不理人' if self.emotion.is_avoidant() else '没有'}；攒下的话 {len(self.emotion.state.get('unanswered') or [])} 条",
             f"注入：{'开' if self.cfg.inject_enabled else '关'}（top {self.cfg.recall_top_k}，上限 {self.cfg.inject_max_chars} 字，{self.cfg.dedupe_turns} 轮内不重复）",
             f"上下文：心情{'贴' if self.cfg.inject_emotion else '不贴'}；最近对话 {self.cfg.recent_chat_messages} 条（上限 {self.cfg.recent_chat_max_chars} 字）",
-            "当前进度：M7（心情与上下文进对话；提醒会记进历史和额度）。",
+            f"分段发送：{'开' if self.cfg.segmented_reply else '关'}（最多 {self.cfg.segmented_max_bubbles} 条；{'私聊显示正在输入' if self.cfg.segmented_typing else '不显示正在输入'}）",
+            "当前进度：M8（回复拆成几条慢慢发；提醒会记进历史）。",
         ]
         yield event.plain_result("\n".join(lines))
 

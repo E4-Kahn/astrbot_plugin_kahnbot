@@ -114,6 +114,10 @@ class Config:
     proactive_cooldown_hours: float = 6.0
     proactive_daily_limit: int = 2
     proactive_silence_minutes: int = 10
+    # 分段发送（M8）
+    segmented_reply: bool = True
+    segmented_max_bubbles: int = 3
+    segmented_typing: bool = True
     timezone: str = ""
     # 模型（留空用 AstrBot 当前默认对话模型）
     llm_provider_id: str = ""
@@ -178,6 +182,9 @@ def load_config(raw: Mapping[str, Any] | None) -> Config:
         proactive_cooldown_hours=_as_float(raw, "proactive_cooldown_hours", 6.0, 0.0, 72.0),
         proactive_daily_limit=_as_int(raw, "proactive_daily_limit", 2, 0, 10),
         proactive_silence_minutes=_as_int(raw, "proactive_silence_minutes", 10, 0, 720),
+        segmented_reply=_as_bool(raw, "segmented_reply", True),
+        segmented_max_bubbles=_as_int(raw, "segmented_max_bubbles", 3, 1, 5),
+        segmented_typing=_as_bool(raw, "segmented_typing", True),
         timezone=str(raw.get("timezone") or "").strip(),
         llm_provider_id=str(raw.get("llm_provider_id") or "").strip(),
         reset_backup_dir=str(raw.get("reset_backup_dir") or "").strip(),
