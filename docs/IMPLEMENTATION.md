@@ -1,6 +1,6 @@
 # 实现计划（实施里程碑）
 
-> 状态：v8，2026-11-12；M1~M8 全部落地并跑过离线冒烟，0.3.1 / 0.3.2 为真机测试后的修复批次，M8 = 0.4.0。
+> 状态：v8.1，2026-11-12；M1~M8 全部落地并跑过离线冒烟，0.3.1 / 0.3.2 / 0.4.1 为真机测试后的修复批次，M8 = 0.4.0。
 > 需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
 > 设计依据 [`refs/memory-design.md`](refs/memory-design.md)、[`refs/wake-design.md`](refs/wake-design.md)
 > 与 [`refs/emotion-design.md`](refs/emotion-design.md)。
@@ -281,6 +281,21 @@ astrbot_plugin_kahnbot/
   部署侧必须关掉原生 `platform_settings.segmented_reply.enable`，见 `DEPLOYMENT.md` 第 7 节。
 - 验收：`tests/smoke_m8.py` 通过；真机上一条 3 句的回复变成 2~3 条，间隔随长度变化，
   私聊能看到"正在输入"，群里没有。
+
+### 0.4.1 —— 启动期的向量就绪 ✅ 2026-11-12
+
+**问题**：真机启动时日志会出现「暂无可用的 embedding provider」。查 core_lifecycle.py 确认
+这是必然的——AstrBot 先 plugin_manager.reload()（插件在这里 __init__），后
+provider_manager.initialize()（模型这时才实例化），插件加载时 provider 列表一定是空的。
+
+- 原来的处理是"失败后冷却 60 秒、下次调用再试"，但启动补向量只在启动那一刻跑一次，必然落空：
+  启动那几分钟写入的记忆没有向量，近似去重与向量检索要等下次重启才补得回来。
+- 现在 EmbeddingClient.wait_ready(attempts=12, interval=10) 在后台等 provider 出现（最多约两分钟），
+  main._warm_embeddings() 拿到后再补 200 条历史记忆；_backfill_embeddings() 每次维护补 20 条，
+  换 embedding provider 之后也会慢慢补齐。
+- 告警文案改成说明"插件先加载、模型后初始化"；/kahn status 在没就绪时显示"未就绪（启动后自动重试）"。
+- 验收：	ests/smoke_m8.py::test_embed_wait_ready 通过（provider 晚到也能等到）；真机启动后
+  一分钟内应看到「向量就绪：openai_embedding（1024 维）」。
 
 ## 3. 依赖与顺序
 

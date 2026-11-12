@@ -17,7 +17,7 @@ desc: |
   群聊/私聊消息进本地 SQLite（带说话人归属），#sl 之类固定文本被丢弃；
   群里只有 @ 她、拍一拍她、叫到名字才进模型，私聊必回，连续短消息并成一次回复；
   她还有九维情绪、五档心情，靠心跳自己漂移。
-version: 0.4.0
+version: 0.4.1
 author: E4-Kahn
 repo: https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 astrbot_version: ">=4.29.4"

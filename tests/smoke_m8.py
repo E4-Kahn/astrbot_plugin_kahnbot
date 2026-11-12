@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT.parent))
 
 from astrbot_plugin_kahnbot.core.config import load_config  # noqa: E402
+from astrbot_plugin_kahnbot.core.embeddings import EmbeddingClient  # noqa: E402
 from astrbot_plugin_kahnbot.core.segments import (  # noqa: E402
     BASE_DELAY,
     MAX_DELAY,
@@ -90,6 +92,36 @@ def test_config():
     print("config ok")
 
 
+class _Provider:
+    def get_dim(self):
+        return 8
+
+
+class _LateContext:
+    """前两次还没有 provider（模拟 AstrBot 启动顺序），第三次才有。"""
+
+    def __init__(self):
+        self.calls = 0
+
+    def get_all_embedding_providers(self):
+        self.calls += 1
+        return [] if self.calls < 3 else [_Provider()]
+
+    def get_provider_by_id(self, provider_id):
+        return None
+
+
+def test_embed_wait_ready():
+    # 没有 context：等不到，快速返回 False
+    assert asyncio.run(EmbeddingClient(None).wait_ready(attempts=1, interval=0.0)) is False
+    # provider 晚一点才出现：wait_ready 能自己重试到拿到
+    client = EmbeddingClient(_LateContext())
+    assert asyncio.run(client.wait_ready(attempts=4, interval=0.0)) is True
+    assert client.available is True
+    assert client.dim == 8
+    print("embed wait_ready ok")
+
+
 def main():
     if BASE_DIR.exists():
         shutil.rmtree(BASE_DIR)
@@ -102,6 +134,7 @@ def main():
     test_merge_short()
     test_delay()
     test_config()
+    test_embed_wait_ready()
     shutil.rmtree(BASE_DIR, ignore_errors=True)
     print("ALL OK", BASE_DIR)
 

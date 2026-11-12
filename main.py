@@ -49,7 +49,7 @@ from .core.summarizer import Summarizer
 from .core.when import format_due
 
 PLUGIN_NAME = "astrbot_plugin_kahnbot"
-PLUGIN_VERSION = "0.4.0"
+PLUGIN_VERSION = "0.4.1"
 MAX_PENDING_TEXTS = 8
 
 
@@ -928,6 +928,7 @@ class KahnBot(Star):
                 await self.summarizer.maybe_run()
             if self.writer is not None:
                 await self.writer.maintain()
+            await self._backfill_embeddings()
             # 主动说话会改 state（冷却 / 日限），维护完统一落一次盘
             save_state(self.state_path, self.emotion.snapshot())
         except Exception:
@@ -984,10 +985,39 @@ class KahnBot(Star):
                 await self.reminder.restore()
             if self.writer is not None:
                 await self.writer.maintain()
-            if self.retriever is not None and self.store is not None:
-                await self.retriever.ensure_embeddings(limit=50)
+            if self.retriever is not None and self.embedder is not None:
+                await self._warm_embeddings()
         except Exception:
             logger.exception("%s 启动任务失败", PLUGIN_NAME)
+
+    async def _backfill_embeddings(self) -> None:
+        """维护时顺手补向量：启动那几分钟写入的记忆、换 provider 之后的旧数据。"""
+        if self.retriever is None or self.embedder is None or not self.embedder.available:
+            return
+        done = await self.retriever.ensure_embeddings(limit=20)
+        if done:
+            logger.debug("%s 补算 %s 条记忆的向量", PLUGIN_NAME, done)
+
+    async def _warm_embeddings(self) -> None:
+        """等 provider 初始化完，再把没有向量的记忆补上。
+
+        插件加载早于模型初始化（AstrBot 里先 `plugin_manager.reload()`、后
+        `provider_manager.initialize()`），启动瞬间拿不到 embedding provider 是必然的。
+        不在这里等一会儿的话，启动那几分钟写入的记忆会一直没有向量，近似去重和
+        向量检索要等到下次重启才补得回来。
+        """
+        if not await self.embedder.wait_ready():
+            logger.warning(
+                "%s 等了约两分钟仍没拿到 embedding provider，检索继续用字面匹配", PLUGIN_NAME
+            )
+            return
+        done = await self.retriever.ensure_embeddings(limit=200)
+        logger.info(
+            "%s 向量就绪：%s%s",
+            PLUGIN_NAME,
+            self.embedder.describe(),
+            f"，补齐 {done} 条历史记忆" if done else "",
+        )
 
     def _warn_conflicts(self) -> None:
         """启动时把"会和本插件打架"的 AstrBot 开关指出来（配置在 WebUI，插件改不了）。"""

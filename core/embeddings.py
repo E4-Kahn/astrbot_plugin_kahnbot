@@ -9,6 +9,7 @@ Ollama、DashScope 等一批 embedding 提供商；插件只需要一个 provide
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from array import array
@@ -54,18 +55,22 @@ class EmbeddingClient:
     def dim(self) -> int:
         return self._dim
 
-    def resolve(self) -> Any:
+    def resolve(self, *, force: bool = False) -> Any:
         """取 provider；取不到就冷却 60 秒再试，告警只打一次。
 
-        插件加载早于模型加载，启动时必然是 None——不能把这次失败缓存成永久失败，
-        否则向量检索和近似去重整场都废了（2026-11-12 真机首跑踩到）。
+        插件加载早于模型加载（`core_lifecycle` 里先 `plugin_manager.reload()`、
+        后 `provider_manager.initialize()`），启动时必然是 None——不能把这次失败
+        缓存成永久失败，否则向量检索和近似去重整场都废了（2026-11-12 真机首跑踩到）。
+
+        `force=True` 跳过冷却，给 `wait_ready()` 这种"明知服务还没起来、就是想再试一次"
+        的场景用。
         """
         if self._provider is not None:
             return self._provider
         if self._context is None:
             return None
         now = time.monotonic()
-        if self._retry_at and now < self._retry_at:
+        if not force and self._retry_at and now < self._retry_at:
             return None
         try:
             provider = None
@@ -81,7 +86,8 @@ class EmbeddingClient:
                 provider = providers[0] if providers else None
                 if provider is None and not self._warned:
                     _logger.warning(
-                        "KahnBot 暂无可用的 embedding provider，稍后重试；期间检索退回字面匹配"
+                        "KahnBot 启动时还没拿到 embedding provider（AstrBot 先加载插件、"
+                        "后初始化模型），稍后自动重试；这段时间检索退回字面匹配"
                     )
         except Exception:  # pragma: no cover - 取决于 AstrBot 版本
             _logger.exception("KahnBot 解析 embedding provider 失败")
@@ -97,10 +103,25 @@ class EmbeddingClient:
             self._dim = 0
         return provider
 
+    async def wait_ready(self, *, attempts: int = 12, interval: float = 10.0) -> bool:
+        """等 AstrBot 把 provider 初始化完（插件先加载、模型后加载）。
+
+        启动阶段最多等 `attempts * interval` 秒；拿到就返回 True。
+        由 `main._startup()` 在后台调用，拿到之后再补算历史记忆的向量。
+        """
+        for index in range(max(1, attempts)):
+            if self._provider is not None:
+                return True
+            if index:
+                await asyncio.sleep(max(0.0, interval))
+            if self.resolve(force=True) is not None:
+                return True
+        return self._provider is not None
+
     def describe(self) -> str:
         provider = self.resolve()
         if provider is None:
-            return "未配置（检索只用字面匹配）"
+            return "未就绪（启动后自动重试；期间只用字面匹配）"
         meta = getattr(provider, "meta", None)
         try:
             info = meta() if callable(meta) else None
