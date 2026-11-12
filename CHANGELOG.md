@@ -4,16 +4,16 @@
 
 ### 修复
 
-- core/embeddings.py：加上 wait_ready()，启动阶段主动等 AstrBot 把 provider 初始化完
-  （最多约两分钟），拿到之后由 main._warm_embeddings() 补算没有向量的历史记忆。以前只有
+- `core/embeddings.py`：加上 `wait_ready()`，启动阶段主动等 AstrBot 把 provider 初始化完
+  （最多约两分钟），拿到之后由 `main._warm_embeddings()` 补算没有向量的历史记忆。以前只有
   "启动时补一次"，而在 AstrBot 里插件加载早于模型加载，这一次必然失败——启动那几分钟写入的记忆
   会一直没有向量，近似去重要等到下次重启才恢复。
-- main._backfill_embeddings()：每次后台维护顺手补 20 条没向量的记忆，换 embedding provider
+- `main._backfill_embeddings()`：每次后台维护顺手补 20 条没向量的记忆，换 embedding provider
   之后也能慢慢补回来，不必重启。
-- main.terminate()：取消后台任务后 wait asyncio.gather(..., return_exceptions=True) 等它们真的退出，再关数据库。
-  以前只 cancel() 不等待，Ctrl+C 停服时偶尔会冒 `Task was destroyed but it is pending` 之类的噪音
-  （日志里那条 LifespanFailureError 是 AstrBot 自己 hypercorn 的关闭竞态，与本插件无关）。
-- 启动告警文案改成说明"插件先加载、模型后初始化"，/kahn status 里没就绪时显示"未就绪（启动后自动重试）"，
+- `main.terminate()`：取消后台任务后 `await asyncio.gather(..., return_exceptions=True) 等它们真的退出，再关数据库。
+  以前只 `cancel()` 不等待，Ctrl+C 停服时偶尔会冒 `Task was destroyed but it is pending` 之类的噪音
+  （日志里那条 `LifespanFailureError` 是 AstrBot 自己 hypercorn 的关闭竞态，与本插件无关）。
+- 启动告警文案改成说明"插件先加载、模型后初始化"，`/kahn status` 里没就绪时显示"未就绪（启动后自动重试）"，
   不再像是配置错误。
 ## [0.4.0] - 2026-11-12
 
