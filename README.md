@@ -10,8 +10,11 @@ KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](http
 > 进流水、回写会话历史，不会「说完就忘」；从 0.3.2 起提醒不占主动额度。
 > 从 0.4.0 起，她的回复不再是一整段：拆成 1~3 条，按字数估打字间隔慢慢发，私聊还会显示「正在输入」。
 > 0.3.1 修了提醒回写历史时崩溃的问题，`/kahn reset` 可以整机重置，「能记住…吗」这类客气问句也会认了；
-> 0.3.2 让到点提醒说人话——「记住 10分钟后提醒我关火」存的是「关火」，到点那句由模型写。
-> 需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，实现顺序见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
+> 0.3.2 让到点提醒说人话——「记住 10分钟后提醒我关火」存的是「关火」，到点那句由模型写；
+> 0.4.1 启动时不再报「没有 embedding」的假警报，等模型就绪后自动补算向量。
+> 需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，实现顺序与交接见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)；
+> 还没排期的想法（检索优化、`[沉默]`、人物小档案、表情包、空间日记）在
+> [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) 第 8 节。
 > 部署前请先看 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) 第 7 节：AstrBot 的 `add_cron_tools` 与
 > 原生「分段回复」都必须关掉，否则提醒会发两遍、回复会被拆两遍。
 
@@ -142,7 +145,7 @@ astrbot_plugin_kahnbot/
 ├── requirements.txt         # 第三方依赖（暂无）
 ├── docs/
 │   ├── REQUIREMENTS.md      # 需求清单（单一事实来源）
-│   ├── IMPLEMENTATION.md    # 实现里程碑 M1~M7
+│   ├── IMPLEMENTATION.md    # 实现里程碑 M1~M8 + 交接（第 7 节）+ 待讨论方案（第 8 节）
 │   ├── DEPLOYMENT.md        # 从零部署清单（SnowLuma / AstrBot / 插件 / 模型）
 │   └── refs/                # 设计与调研笔记（索引见 docs/refs/README.md）
 ├── CHANGELOG.md

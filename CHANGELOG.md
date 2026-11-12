@@ -10,11 +10,17 @@
   会一直没有向量，近似去重要等到下次重启才恢复。
 - `main._backfill_embeddings()`：每次后台维护顺手补 20 条没向量的记忆，换 embedding provider
   之后也能慢慢补回来，不必重启。
-- `main.terminate()`：取消后台任务后 `await asyncio.gather(..., return_exceptions=True) 等它们真的退出，再关数据库。
+- `main.terminate()`：取消后台任务后 `await asyncio.gather(*pending, return_exceptions=True)` 等它们真的退出，再关数据库。
   以前只 `cancel()` 不等待，Ctrl+C 停服时偶尔会冒 `Task was destroyed but it is pending` 之类的噪音
   （日志里那条 `LifespanFailureError` 是 AstrBot 自己 hypercorn 的关闭竞态，与本插件无关）。
 - 启动告警文案改成说明"插件先加载、模型后初始化"，`/kahn status` 里没就绪时显示"未就绪（启动后自动重试）"，
   不再像是配置错误。
+
+### 文档
+
+- 待讨论方案并入 `docs/IMPLEMENTATION.md` 第 8 节（P1 检索优化、P2 `[沉默]`、P3 人物小档案、P4 表情包、
+  P5 空间日记），删掉临时的 `docs/PLANS.md`，交接信息只在 `REQUIREMENTS` / `IMPLEMENTATION` / `DEPLOYMENT` 三本里。
+
 ## [0.4.0] - 2026-11-12
 
 ### 新增（M8：分段发送）
