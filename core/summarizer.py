@@ -26,12 +26,13 @@ SUMMARY_SYSTEM = (
     "不抽：寒暄、情绪、一次性提问、玩笑、没有主语无法独立成句的碎片。\n"
     "每条必须能独立读懂（把'他''那个'换成具体的人或事）。不许编造记录里没有的内容。\n"
     "只输出 JSON 数组，不要解释。格式：\n"
-    '[{"text": "一句话事实", "kind": "plan|preference|relation|fact", '
+    '[{"text": "一句话事实", "kind": "plan|preference|relation|anniversary|fact", '
     '"source": "owner|third_party", "confidence": 0.0}]\n'
-    "source 按原说话人判：主人说的 owner，其他人说的 third_party。没有可记的就输出 []。"
+    "source 按原说话人判：主人说的 owner，其他人说的 third_party。"
+    "生日、纪念日、周年这类用 anniversary，并在 text 里保留日期。没有可记的就输出 []。"
 )
 
-VALID_KINDS = {"plan", "preference", "relation", "fact"}
+VALID_KINDS = {"plan", "preference", "relation", "anniversary", "fact"}
 WATERMARK_KEY = "last_summary_ts"
 MAX_ROWS = 400
 

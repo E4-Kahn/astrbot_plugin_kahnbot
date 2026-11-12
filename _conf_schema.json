@@ -134,6 +134,30 @@
     "default": 5,
     "hint": "同一条记忆在这几轮内不重复注入，避免连续几轮都在说同一件事。填 0 关闭去重。"
   },
+  "inject_emotion": {
+    "type": "bool",
+    "description": "把心情带进对话",
+    "default": true,
+    "hint": "每轮都贴一小段当前心情（含「心情平常」），让语气有连续性：高兴时更活泼，生气时更冲。只有几十个字，关掉会明显变得「每轮都是同一个她」。"
+  },
+  "recent_chat_messages": {
+    "type": "int",
+    "description": "带几句最近对话",
+    "default": 10,
+    "hint": "把当前会话最近几条消息贴进请求，包括她自己说过的（标成「你：」）。填 0 关闭。主要用于群聊接话头；私聊本来就有上下文，可以调小。"
+  },
+  "recent_chat_max_chars": {
+    "type": "int",
+    "description": "最近对话字符上限",
+    "default": 600,
+    "hint": "最近对话这段最多占多少字，超出从最旧的开始丢。和上面的条数一起卡预算，避免长消息把上下文吃光。"
+  },
+  "kind_inference": {
+    "type": "bool",
+    "description": "自动猜记忆类型",
+    "default": true,
+    "hint": "写入时按关键词猜这条属于计划/偏好/关系/纪念日（正则，不调模型）。类型只影响两件事：纪念日按年提醒、生气时先不翻「暖」的记忆。猜错了不影响记忆本身。"
+  },
   "remember_enabled": {
     "type": "bool",
     "description": "识别「记住…」",

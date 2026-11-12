@@ -2,9 +2,9 @@
 
 这里只做三件事：读配置、建数据层、注册 handler / 指令；业务逻辑都在 `core/` 下。
 
-当前进度：M6（主动说话与收尾）。她在 M5 的基础上会在沉默够久、情绪上来时自己开口
-（冷却 6 小时、日限 2 条、免打扰时段不吵人）；生气到一定程度会"躲"起来不说话，
-但被哄或主人一直找她就会出来，躲起来期间被吞的话下次会记得。
+当前进度：M7（情绪与上下文进对话）。她在 M6 的基础上，每一轮回复都会带上
+当前心情（F19）、最近几句群聊（F11/F14）、按需检索到的长期记忆；提醒也说得出、
+记得住——发出去之后会占主动说话的额度并回写会话历史，不会"说完就忘"。
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from .core.config import Config, load_config
 from .core.embeddings import EmbeddingClient
 from .core.emotion import Emotion
 from .core.heartbeat import Heartbeat
-from .core.injector import Injector, build_block
+from .core.injector import Injector, build_block, build_recent_chat, drop_warm
 from .core.llm import LLMClient
 from .core.memory import MemoryWriter
 from .core.memoryfiles import MemoryFiles
@@ -42,12 +42,12 @@ from .core.recorder import Recorder
 from .core.reminder import ReminderService, resolve_tz
 from .core.retriever import Retriever
 from .core.state import load_state, save_state
-from .core.store import Store
+from .core.store import Store, now_ts
 from .core.summarizer import Summarizer
 from .core.when import format_due
 
 PLUGIN_NAME = "astrbot_plugin_kahnbot"
-PLUGIN_VERSION = "0.2.0"
+PLUGIN_VERSION = "0.3.0"
 MAX_PENDING_TEXTS = 8
 
 
@@ -103,6 +103,7 @@ class KahnBot(Star):
             send=self._send_text,
             context=self.context,
             tz_name=tz_name,
+            on_sent=self._after_reminder_sent,
         )
 
         # 情绪 + 心跳（M3）：状态存 state.json，与记忆同目录
@@ -117,7 +118,7 @@ class KahnBot(Star):
             cfg=self.cfg,
             send=self._send_text,
             tz=self.tz,
-            on_sent=self._remember_proactive_turn,
+            on_sent=self._after_proactive_sent,
         )
         self.heartbeat = Heartbeat(
             PLUGIN_NAME,
@@ -237,8 +238,8 @@ class KahnBot(Star):
 
     @filter.on_llm_request(priority=-1000)
     async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
-        """把检索到的长期记忆贴到本轮请求里（F14/F15；不动 system_prompt）。"""
-        if not self.cfg.enabled or not self.cfg.inject_enabled or self.store is None:
+        """把心情、长期记忆、最近几句对话贴到本轮请求里（F11/F14/F15/F19）。"""
+        if not self.cfg.enabled or self.store is None:
             return
         if (event.get_platform_name() or "") == "cron":
             return  # 提醒任务不查记忆，免得自己提醒自己
@@ -248,7 +249,28 @@ class KahnBot(Star):
 
         umo = event.unified_msg_origin or ""
         owner_context = self._is_owner(event, event.get_sender_id() or "")
+        avoidant = self.emotion.is_avoidant()
         self._inject_unanswered(req)
+
+        # 心情每轮都贴：哪怕只是"平常"，语气也该是连续的（F19）
+        if self.cfg.inject_emotion:
+            self._append_part(req, self.emotion.render(always=True))
+
+        # 回避档里先不翻记忆——正在气头上，翻出来只会更难受（emotion-design §5）
+        if self.cfg.inject_enabled and not avoidant:
+            await self._inject_recall(req, query, umo, owner_context)
+
+        # 最近几句对话：让她接得上话头（F11/F14）；回避时也不贴
+        if self.cfg.recent_chat_messages > 0 and not avoidant:
+            self._inject_recent_chat(req, umo)
+
+    async def _inject_recall(
+        self,
+        req: ProviderRequest,
+        query: str,
+        umo: str,
+        owner_context: bool,
+    ) -> None:
         self.injector.next_turn(umo)
         try:
             hits = await self.retriever.search(
@@ -262,6 +284,10 @@ class KahnBot(Star):
             return
         if not hits:
             return
+        if self.emotion.mode == "angry":
+            hits = drop_warm(hits)  # 生气时先把"暖"的记忆收起来
+            if not hits:
+                return
 
         fresh = self.injector.fresh(hits, umo)
         if not fresh:
@@ -272,10 +298,7 @@ class KahnBot(Star):
         block, used = build_block(fresh, self.cfg.inject_max_chars)
         if not block:
             return
-        if TextPart is not None:
-            req.extra_user_content_parts.append(TextPart(text=block).mark_as_temp())
-        else:  # pragma: no cover - 只在旧版本 AstrBot 上走这里
-            req.system_prompt = (req.system_prompt or "") + "\n" + block
+        self._append_part(req, block)
         self.injector.mark(used, umo)
 
         if self.cfg.debug:
@@ -287,6 +310,24 @@ class KahnBot(Star):
                 query[:30],
                 block,
             )
+
+    def _inject_recent_chat(self, req: ProviderRequest, umo: str) -> None:
+        try:
+            rows = self.store.recent_messages(umo, limit=self.cfg.recent_chat_messages)
+        except Exception:
+            logger.exception("%s 读取最近对话失败", PLUGIN_NAME)
+            return
+        block = build_recent_chat(rows, self.cfg.recent_chat_max_chars)
+        self._append_part(req, block)
+
+    def _append_part(self, req: ProviderRequest, text: str | None) -> None:
+        """临时内容块：不写 system_prompt，否则前缀缓存每轮都会失效（capabilities §13）。"""
+        if not text:
+            return
+        if TextPart is not None:
+            req.extra_user_content_parts.append(TextPart(text=text).mark_as_temp())
+        else:  # pragma: no cover - 只在旧版本 AstrBot 上走这里
+            req.system_prompt = (req.system_prompt or "") + "\n" + text
 
     # ------------------------------------------------------------------ 指令
 
@@ -316,7 +357,8 @@ class KahnBot(Star):
             f"主动说话：{'开' if self.cfg.proactive_enabled else '关'}（冷却 {self.cfg.proactive_cooldown_hours:g} 小时、日限 {self.cfg.proactive_daily_limit} 条、沉默 {self.cfg.proactive_silence_minutes} 分钟才开口）",
             f"回避：{'正在躲，' + self._fmt_ts(int(self.emotion.state.get('avoid_until') or 0)) + ' 前不理人' if self.emotion.is_avoidant() else '没有'}；攒下的话 {len(self.emotion.state.get('unanswered') or [])} 条",
             f"注入：{'开' if self.cfg.inject_enabled else '关'}（top {self.cfg.recall_top_k}，上限 {self.cfg.inject_max_chars} 字，{self.cfg.dedupe_turns} 轮内不重复）",
-            "当前进度：M6（会记事、会提醒、闹脾气会躲、沉默久了会主动开口）。",
+            f"上下文：心情{'贴' if self.cfg.inject_emotion else '不贴'}；最近对话 {self.cfg.recent_chat_messages} 条（上限 {self.cfg.recent_chat_max_chars} 字）",
+            "当前进度：M7（心情与上下文进对话；提醒会记进历史和额度）。",
         ]
         yield event.plain_result("\n".join(lines))
 
@@ -689,6 +731,8 @@ class KahnBot(Star):
         try:
             if self.reminder is not None:
                 await self.reminder.poll_due()
+            # M7：临近日程/纪念日 → 惦记、高兴（F19 的两个联动点）
+            self._apply_schedule_hooks()
             # M6：主动说话（情绪概率路）。放在提醒之后：到点的正事优先。
             if self.proactive is not None:
                 await self.proactive.maybe_run()
@@ -700,6 +744,40 @@ class KahnBot(Star):
             save_state(self.state_path, self.emotion.snapshot())
         except Exception:
             logger.exception("%s 后台维护失败", PLUGIN_NAME)
+
+    def _apply_schedule_hooks(self) -> None:
+        """把"日程/纪念日"翻译成心情变化；每天最多各触发一次（emotion 内部去重）。"""
+        if self.store is None:
+            return
+        now = int(time.time())
+        changed = False
+        try:
+            soon = [
+                row
+                for row in self.store.facts_with_due(now, now + 3 * 86400)
+                if (row["kind"] or "") == "plan"
+            ]
+            if soon and self.emotion.on_plan_soon(now):
+                changed = True
+        except Exception:
+            logger.exception("%s 检查临近日程失败", PLUGIN_NAME)
+        try:
+            local = datetime.datetime.fromtimestamp(now, self.tz)
+            day_start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + datetime.timedelta(days=1)
+            today = [
+                row
+                for row in self.store.facts_with_due(
+                    int(day_start.timestamp()) - 1, int(day_end.timestamp())
+                )
+                if (row["kind"] or "") == "anniversary"
+            ]
+            if today and self.emotion.on_anniversary(now):
+                changed = True
+        except Exception:
+            logger.exception("%s 检查纪念日失败", PLUGIN_NAME)
+        if changed:
+            save_state(self.state_path, self.emotion.snapshot())
 
     def _ensure_startup(self) -> None:
         if self._startup_task is not None:
@@ -741,8 +819,8 @@ class KahnBot(Star):
             return False
 
     def _must_reply(self, reason: str, text: str) -> bool:
-        """回避档里也必须回的情况：被叫到、被拍、被问"是不是生气了"、道歉。"""
-        if reason in (wake.AT, wake.POKE):
+        """回避档里也一定要回的情况：被叫到名字、被问"是不是生气了"、道歉。"""
+        if reason == wake.AT:
             return True
         value = (text or "").strip()
         return any(word in value for word in ("对不起", "抱歉", "我错了", "别生气", "在吗", "你生气了", "是不是生气了"))
@@ -768,8 +846,53 @@ class KahnBot(Star):
         else:  # pragma: no cover
             req.system_prompt = (req.system_prompt or "") + "\n" + block
 
-    async def _remember_proactive_turn(self, umo: str, text: str) -> None:
-        """主动说的话也要进历史，否则下一轮模型不知道自己刚才说过什么（F16）。"""
+    # ------------------------------------------------------------------ 主动消息收尾
+
+    async def _after_proactive_sent(self, umo: str, text: str) -> None:
+        """主动说完一句：记进流水（最近对话能看到）、回写会话历史（下一轮知道自己说过）。"""
+        self._record_outgoing(umo, text)
+        await self._write_assistant_turn(umo, text)
+
+    async def _after_reminder_sent(self, umo: str, text: str) -> None:
+        """提醒也是"她主动说的"：占一次额度、进流水、回写历史（F16，M7）。"""
+        self._count_proactive_send()
+        self._record_outgoing(umo, text)
+        await self._write_assistant_turn(umo, text)
+
+    def _count_proactive_send(self) -> None:
+        """主动说话的日限与提醒共用；提醒自己不受限，只是挤掉她今天闲扯的额度。"""
+        state = self.emotion.state
+        today = self._today()
+        if state.get("proactive_day") != today:
+            state["proactive_day"] = today
+            state["proactive_count"] = 0
+        state["proactive_count"] = int(state.get("proactive_count") or 0) + 1
+        save_state(self.state_path, self.emotion.snapshot())
+
+    def _record_outgoing(self, umo: str, text: str) -> None:
+        """她说的话也进流水：最近对话里标成"你："，但汇总时不参与事实提炼。"""
+        if self.store is None or not umo or not text:
+            return
+        try:
+            parts = umo.split(":")
+            platform = parts[0] if parts else ""
+            group_id = parts[2] if len(parts) > 2 and "Group" in parts[1] else None
+            self.store.add_message(
+                ts=now_ts(),
+                umo=umo,
+                platform=platform,
+                group_id=group_id,
+                sender_id="self",
+                sender_name=PLUGIN_NAME,
+                is_owner=False,
+                is_bot=True,
+                text=text[:500],
+            )
+        except Exception:
+            logger.exception("%s 记录主动消息失败", PLUGIN_NAME)
+
+    async def _write_assistant_turn(self, umo: str, text: str) -> None:
+        """绕开事件管线发出去的话，AstrBot 不会自己写进 history，必须手动补一轮。"""
         manager = getattr(self.context, "conversation_manager", None)
         if manager is None or not umo or not text:
             return
@@ -811,7 +934,8 @@ class KahnBot(Star):
             if self._is_owner(event, sender_id):
                 changed = self.emotion.on_owner_text(text) is not None
             if wake.is_poke_to_self(event, str(event.get_self_id() or "")):
-                self.emotion.on_poke()
+                # 回避档里被主人连着拍会心软（M7），所以要告诉他这一下是谁拍的
+                self.emotion.on_poke(owner=self._is_owner(event, sender_id))
                 changed = True
             # M6：回避档的进入/退出（blame 持续高位、被吓到、时间到了）
             if self.emotion.check_avoidant(private=event.is_private_chat()):

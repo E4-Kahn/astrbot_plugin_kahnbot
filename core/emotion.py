@@ -99,6 +99,8 @@ def default_state(now: int | None = None) -> dict[str, Any]:
         "blame_high_since": 0,
         "avoid_until": 0,
         "owner_msgs": 0,
+        "plan_soon_day": "",
+        "anniversary_day": "",
         "unanswered": [],
         "log": [],
     }
@@ -147,6 +149,11 @@ def coerce_state(raw: Any, now: int | None = None) -> dict[str, Any]:
         state["proactive_count_today"] = int(raw.get("proactive_count_today", 0))
     except (TypeError, ValueError):
         pass
+
+    for key in ("plan_soon_day", "anniversary_day"):
+        value = raw.get(key)
+        if isinstance(value, str):
+            state[key] = value[:10]
 
     unanswered = raw.get("unanswered")
     if isinstance(unanswered, list):
@@ -260,13 +267,51 @@ class Emotion:
             return self._record("夸奖/道谢", now)
         return None
 
-    def on_poke(self, now: int | None = None) -> None:
-        """被拍一拍：被注意到是开心的；生气时被戳更烦（§9）。"""
+    def on_poke(self, now: int | None = None, *, owner: bool = True) -> str | None:
+        """被拍一拍：被注意到是开心的；生气时被戳更烦（§9）。
+
+        回避档里被主人连着拍会像被哄一样心软（M7）：这里给 `owner_msgs`
+        记数，攒够 `AVOID_OWNER_MSGS` 次就出来。
+        """
         self._bump(social=0.05, joy=0.05)
+        if self.is_avoidant() and owner:
+            state = self.state
+            state["owner_msgs"] = int(state.get("owner_msgs") or 0) + 1
+            if state["owner_msgs"] >= AVOID_OWNER_MSGS:
+                return self._exit_avoidant("被拍得心软了", now)
+            self._record("被拍一拍", now, quiet=True)
+            return None
         if self.mode == "angry":
             self.state["blame"] = _clamp(self.blame + 3, 0.0, 100.0)
         self.state["mode"] = self.mode
         self._record("被拍一拍", now, quiet=True)
+        return None
+
+    # ---------------------------------------------------------------- 日程联动（§8 / F19）
+
+    def on_plan_soon(self, now: int | None = None) -> str | None:
+        """三天内有安排：开始惦记。每天最多抬一次 expectation，免得刷成满值。"""
+        now = int(now if now is not None else time.time())
+        day = time.strftime("%Y-%m-%d", time.localtime(now))
+        if self.state.get("plan_soon_day") == day:
+            return None
+        self.state["plan_soon_day"] = day
+        # expectation 不在 DRIVES 里，是单独漂移的一个数（见文件头注释）
+        self.state["expectation"] = _clamp(self.state["expectation"] + 0.20)
+        self._bump(attachment=0.05)
+        self.state["mode"] = self.mode
+        return self._record("惦记着日程", now)
+
+    def on_anniversary(self, now: int | None = None) -> str | None:
+        """今天是纪念日：高兴一点，也更黏人（§10 联动）。同样一天一次。"""
+        now = int(now if now is not None else time.time())
+        day = time.strftime("%Y-%m-%d", time.localtime(now))
+        if self.state.get("anniversary_day") == day:
+            return None
+        self.state["anniversary_day"] = day
+        self._bump(joy=0.25, attachment=0.10)
+        self.state["mode"] = self.mode
+        return self._record("今天是纪念日", now)
 
     def on_miss(self, days: float) -> None:
         """主人好多天没说话 → 想念（§6 第一条）。"""
@@ -351,12 +396,18 @@ class Emotion:
 
     # ---------------------------------------------------------------- 呈现
 
-    def render(self) -> str | None:
-        """给模型的自然语言情绪提示；日常且没有明显偏离时返回 None（§8）。"""
+    def render(self, *, always: bool = False) -> str | None:
+        """给模型的自然语言情绪提示；日常且没有明显偏离时返回 None（§8）。
+
+        `always=True`（M7 起每轮注入用）时，日常状态也回一句"心情平常"——
+        几个字的成本换来语气连续，用户 2026-11-12 确认要这个。
+        """
         mode = self.mode
         notable = self._notable()
         if mode == "daily" and not notable:
-            return None
+            if not always:
+                return None
+            return "<emotion>\n你现在心情平常，正常聊就好。\n</emotion>"
 
         mood = {
             "daily": "你今天心情还算平稳",

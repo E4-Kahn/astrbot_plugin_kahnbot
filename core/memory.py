@@ -19,7 +19,9 @@ import time
 from dataclasses import dataclass
 
 from .embeddings import cosine, pack_vector, unpack_vector
+from .kinds import ANNIVERSARY, infer_kind
 from .llm import score_importance
+from .when import parse_due
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +75,13 @@ class MemoryWriter:
         text = " ".join((text or "").split())
         if len(text) < 2:
             return WriteResult(reason="skipped")
+        # 类型靠正则猜（M7）：显式传了别的 kind（汇总给的 plan/preference…）就不动它
+        if kind == "fact" and getattr(self.cfg, "kind_inference", True):
+            kind = infer_kind(text)
         now = int(now if now is not None else time.time())
+        # 纪念日没说 due 的，从正文里抠一个（"5 月 20 日是我们的纪念日"）
+        if due_ts is None and kind == ANNIVERSARY:
+            due_ts = parse_due(text, now=now)
         layer = layer_of(source)
         digest = fact_hash(text)
 

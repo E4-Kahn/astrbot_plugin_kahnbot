@@ -45,6 +45,7 @@ class ReminderService:
         send,
         context=None,
         tz_name: str | None = None,
+        on_sent=None,
     ) -> None:
         self.plugin_name = plugin_name
         self.store = store
@@ -55,6 +56,8 @@ class ReminderService:
         # 主程序已经算好了"插件配置 → AstrBot 全局"的兜底时区，优先用它
         self.tz_name = tz_name if tz_name is not None else (cfg.timezone or "")
         self.tz = resolve_tz(self.tz_name)
+        # 发出去之后回调主程序：回写会话历史、占一次主动说话的额度（F16）
+        self.on_sent = on_sent
         self._jobs: dict[str, str] = {}
         self._firing: set[str] = set()
 
@@ -69,7 +72,7 @@ class ReminderService:
 
     def cron_expression(self, due_ts: int) -> str:
         dt = datetime.fromtimestamp(int(due_ts), self.tz)
-        return f"{dt.minute} {dt.hour} {dt.day} {dt.month} *"
+        return f"{dt.minute:02d} {dt.hour:02d} {dt.day} {dt.month} *"
 
     def _cron(self):
         return getattr(self.context, "cron_manager", None)
@@ -167,6 +170,15 @@ class ReminderService:
 
     # ------------------------------------------------------------------ 触发
 
+    def next_anniversary(self, due_ts: int) -> int:
+        """纪念日发完之后推到明年同一时刻（2 月 29 日落到 2 月 28 日）。"""
+        dt = datetime.fromtimestamp(int(due_ts), self.tz)
+        try:
+            nxt = dt.replace(year=dt.year + 1)
+        except ValueError:
+            nxt = dt.replace(year=dt.year + 1, day=28)
+        return int(nxt.timestamp())
+
     async def _fire(self, fact_id: str) -> bool:
         if fact_id in self._firing:
             return False
@@ -181,13 +193,30 @@ class ReminderService:
             if row["due_ts"] is None:
                 await self._drop_job(fact_id)
                 return False
-            # 先清 due：cron 和兜底扫描同时到点也只会发一次。
-            self.store.clear_due(fact_id)
-            try:
-                self.files.remove_schedule(fact_id)
-            except Exception:  # noqa: BLE001
-                logger.exception("清理 schedule.md 失败（%s）", fact_id)
-            await self._drop_job(fact_id)
+            due = int(row["due_ts"])
+            anniversary = (row["kind"] or "") == "anniversary"
+            if anniversary:
+                # 纪念日按年重复：due 推到明年，crontab（月/日/时/分）明年还会再命中
+                try:
+                    self.store.set_due(fact_id, self.next_anniversary(due))
+                    self.files.add_schedule(
+                        self.next_anniversary(due),
+                        row["scope"] or "私聊",
+                        fact_id,
+                        phrase or f"提醒你一下：{row['text']}",
+                        self.tz,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("纪念日顺延失败（%s）", fact_id)
+                    self.store.clear_due(fact_id)
+            else:
+                # 先清 due：cron 和兜底扫描同时到点也只会发一次。
+                self.store.clear_due(fact_id)
+                try:
+                    self.files.remove_schedule(fact_id)
+                except Exception:  # noqa: BLE001
+                    logger.exception("清理 schedule.md 失败（%s）", fact_id)
+                await self._drop_job(fact_id)
             if not umo:
                 logger.warning("提醒 #%s 没有会话来源，发不出去", fact_id)
                 return False
@@ -195,6 +224,11 @@ class ReminderService:
             ok = bool(await self.send(umo, text))
             if ok:
                 self.store.touch_facts([fact_id], int(time.time()))
+                if self.on_sent is not None:
+                    try:
+                        await self._maybe_await(self.on_sent(umo, text))
+                    except Exception:  # noqa: BLE001 - 回写失败不影响已发出的消息
+                        logger.exception("提醒发送后的回调失败（%s）", fact_id)
             return ok
         finally:
             self._firing.discard(fact_id)
@@ -210,12 +244,18 @@ class ReminderService:
             logger.debug("删除提醒 job 失败（%s）", fact_id)
 
     async def poll_due(self, now: int | None = None) -> int:
-        """兜底：把已经到点、还没发出去的提醒发掉。"""
+        """兜底：把已经到点、还没发出去的提醒发掉。
+
+        已经挂了 cron job 的条目交给人 job 自己触发——同一条不能既被 cron 发一次、
+        又被兜底扫一次（纪念日尤其明显：它到点后 due 推到明年而不是清空）。
+        """
         if not self.cfg.reminder_enabled:
             return 0
         now = int(now if now is not None else time.time())
         fired = 0
         for row in self.store.due_facts(now):
+            if row["fact_id"] in self._jobs:
+                continue
             if await self._fire(row["fact_id"]):
                 fired += 1
         return fired

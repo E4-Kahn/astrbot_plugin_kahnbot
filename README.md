@@ -2,10 +2,12 @@
 
 KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](https://github.com/E4-Kahn/astrbot_plugin_kahnbot)）。
 
-> 当前进度 **M6（主动说话与收尾）**：她会记事（「记住…」自动写入、重要度打分、见闻层、六小时汇总、
-> 到点提醒），也有脾气：生气到一定程度会躲起来不说话，被哄或主人一直找她就会出来，
+> 当前进度 **M7（情绪与上下文进对话）**：她会记事（「记住…」自动写入、重要度打分、见闻层、六小时汇总、
+> 到点提醒），也有脾气：生气到一定程度会躲起来不说话，被哄、被连着拍或主人一直找她就会出来，
 > 躲起来期间被吞的话下次开口时还记得；沉默够久、情绪上来时她会自己找话说
 > （冷却 6 小时、日限 2 条、23:00–08:00 免打扰）。
+> 从 M7 起，每一轮回复都会带上当前心情、最近几句群聊和按需检索到的记忆；提醒发出去也算她主动说的——
+> 占一次额度、进流水、回写会话历史，不会「说完就忘」。
 > 需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，实现顺序见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
 
 ## 环境要求
@@ -53,6 +55,10 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | `recall_min_score` | float | `0.35` | 检索分数下限（bge-m3 上无关句子约 0.29，别调到 0.3 以下） |
 | `inject_max_chars` | int | `800` | 单次注入字符上限 |
 | `dedupe_turns` | int | `5` | 同一条记忆多少轮内不重复注入；0 = 关闭去重 |
+| `inject_emotion` | bool | `true` | 每轮贴一小段当前心情（含「平常」），让语气连续；只有几十个字 |
+| `recent_chat_messages` | int | `10` | 带几句当前会话的最近对话（含她自己的，标「你：」）；0 = 关闭 |
+| `recent_chat_max_chars` | int | `600` | 最近对话这段的字符上限，超出从最旧的丢 |
+| `kind_inference` | bool | `true` | 写入时按关键词猜类型（plan / preference / relation / anniversary / fact），不调模型 |
 | `remember_enabled` | bool | `true` | 是否识别「记住…」并自动写入（判定只看句式和唤醒，不为每条消息调模型） |
 | `score_importance` | bool | `true` | 写入后后台让模型打 0~100 分（拿不到保持 50）；只影响排序与归档 |
 | `summary_enabled` | bool | `true` | 是否定时把聊天流水交给模型提炼长期记忆 |
@@ -101,7 +107,8 @@ astrbot_plugin_kahnbot/
 │   ├── state.py             # state.json 原子读写
 │   ├── embeddings.py        # 复用 AstrBot 的 embedding provider（含降级）
 │   ├── retriever.py         # 向量 + 字面混合排序、隐私/取代/归档过滤
-│   ├── injector.py          # <memory> 拼装、预算截断、N 轮内去重
+│   ├── injector.py          # <memory> / <recent_chat> 拼装、预算截断、N 轮内去重
+│   ├── kinds.py             # 记忆类型推断（plan / preference / relation / anniversary…）
 │   ├── when.py              # 中文时间短语 → due_ts（明天八点 / 下周三 / 3 天后）
 │   ├── remember.py          # 「记住…」三层判定：唤醒 / 句式 / 回执
 │   ├── memory.py            # 记忆写入：去重 / 取代 / 打分 / 归档 / 删除
@@ -116,13 +123,14 @@ astrbot_plugin_kahnbot/
 │   ├── smoke_m3.py          # 情绪漂移 / 五档 / 心跳补跳
 │   ├── smoke_m4.py          # 分词 / 排序 / 过滤 / 注入预算与去重
 │   ├── smoke_m5.py          # 时间解析 / 记住判定 / md 往返 / 汇总 / 提醒
-│   └── smoke_m6.py          # 主动说话闸门 / 发送兜底 / 回避档 / 未回话
+│   ├── smoke_m6.py          # 主动说话闸门 / 发送兜底 / 回避档 / 未回话
+│   └── smoke_m7.py          # 类型推断 / 最近对话 / 心情联动 / 拍一拍心软 / 纪念日顺延
 ├── metadata.yaml            # 插件元数据（名称/版本/作者/仓库）
 ├── _conf_schema.json        # WebUI 配置表单
 ├── requirements.txt         # 第三方依赖（暂无）
 ├── docs/
 │   ├── REQUIREMENTS.md      # 需求清单（单一事实来源）
-│   ├── IMPLEMENTATION.md    # 实现里程碑 M1~M6
+│   ├── IMPLEMENTATION.md    # 实现里程碑 M1~M7
 │   ├── DEPLOYMENT.md        # 从零部署清单（SnowLuma / AstrBot / 插件 / 模型）
 │   └── refs/                # 设计与调研笔记（索引见 docs/refs/README.md）
 ├── CHANGELOG.md
@@ -145,7 +153,7 @@ astrbot_plugin_kahnbot/
    Windows 上可以用 `mklink /J` 做目录联接，改代码不用来回拷）。
 2. 改完代码后在 WebUI 插件页点「重载」，或者重启 AstrBot（`astrbot run` 不带 `--reload` 不会热更）。
 3. 数据目录：`data/plugin_data/astrbot_plugin_kahnbot/`，用 `StarTools.get_data_dir()` 获取。
-4. 离线冒烟：`python tests/smoke_m1.py` … `smoke_m6.py`，不需要启动 AstrBot。
+4. 离线冒烟：`python tests/smoke_m1.py` … `smoke_m7.py`，不需要启动 AstrBot。
    环境、交接状态与常见坑见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) 第 7 节。
 
 ## 更新日志

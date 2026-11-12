@@ -124,6 +124,14 @@ CREATE TABLE meta (
 5. 来源与说话人取当前 `event`，不靠模型猜。
 6. **回执**：回一句"好，我记下了：<正文>"（含条目 id 更好，方便 `/kahn memory forget`）。
 
+> **实现记录（2026-11-12，M5 落地、M7 补 kind，`core/memory.py::add`）**：`kind` 不调模型，
+> 由 `core/kinds.py::infer_kind()` 按关键词正则推断（`anniversary / intimacy / relation / plan /
+> preference / fact`，按顺序首个命中），配置 `kind_inference=false` 可关；关掉后一律 `fact`。
+> 之所以选推断而不是让模型判：写入已经有一次检索 + 一次打分调用，再加一次判类型既贵又不稳定，
+> 而 kind 只用于取代检查、生气档过滤和日程联动，猜错的代价很小。
+> 显式说"记住…"时正文是主人原话，因此 `kind` 从原话推断；`anniversary` 没带 `due_ts` 的会再跑一次
+> `parse_due()` 从正文抠日期（「5 月 20 日是我们的纪念日」→ 下一个 5 月 20 日）。
+
 ### 5.2 定时汇总
 
 后台任务，按 `state.json` 里 `last_summary_ts` 增量读 `message` 表：
@@ -150,7 +158,8 @@ CREATE TABLE meta (
 - 只抽"长期有用"的事实：偏好、计划、关系、承诺、关键日期、身份信息。
 - 不要抽：寒暄、情绪、一次性的提问（**除了**明确写给主人的日期类转述，见下条）。
 - 每条必须能独立读懂（不要出现"他/那个"这类指代）。
-- 输出 JSON 数组，元素 `{"text": "...", "kind": "plan|preference|relation|fact", "source": "owner|third_party", "confidence": 0-1}`；没有可记的就输出 `[]`。
+- 输出 JSON 数组，元素 `{"text": "...", "kind": "plan|preference|relation|anniversary|fact", "source": "owner|third_party", "confidence": 0-1}`；没有可记的就输出 `[]`。
+  `anniversary` 用于生日/纪念日/周年，`text` 里要保留日期（M7 起，见 §10 的按年重复）。
 - **`source` 判定**：原文说话人是主人 → `owner`；是群友 → `third_party`（哪怕内容是"明天是管理员生日"）。
   只有 `owner` 进 `facts.md` 并能触发提醒；`third_party` 进 `observed.md`，注入时标注来源与"未必属实"。
 - **不许编造**：只能写原文里出现过的信息；拿不准就不写。
@@ -409,6 +418,14 @@ AstrBot 4.29.4 自带 `CronJobManager`（`core/cron/manager.py:103`，底层 APS
 - 文案：`schedule.md` 一行存 `- YYYY-MM-DD HH:MM · [会话] · #fact_id · 到时候要说的话`，
   handler 优先用这一行；被手改过就直接照着念。
 - 时区非法（`ZoneInfo` 抛 `ZoneInfoNotFoundError`）时退回系统本地时区并告警。
+
+**实现记录（2026-11-12，M7 补，`core/reminder.py::_fire`）**：
+
+- `kind=anniversary` 按年重复：到点说完把 `due_ts` 与 `schedule.md` 那行顺延到明年同一时刻，
+  **job 不摘**（crontab 是 `m H d M *`，明年同一天同一分钟会再命中）；2 月 29 日的落到 2 月 28 日。
+- 普通 `plan`/`fact` 到点后清 `due_ts`、删 `schedule.md` 行、摘 job，只响一次。
+- 发送成功回调 `on_sent`，`main` 里把这条提醒记成 `is_bot=1` 流水并回写会话历史，
+  同时计入当天的主动额度（与 `proactive` 共用 `proactive_day` / `proactive_count`）。
 
 ## 11. 待定与风险
 

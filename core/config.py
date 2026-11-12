@@ -93,9 +93,14 @@ class Config:
     recall_min_score: float = 0.35
     inject_max_chars: int = 800
     dedupe_turns: int = 5
+    # 上下文注入（M7：情绪 + 最近群聊；F11 / F14 / F19）
+    inject_emotion: bool = True
+    recent_chat_messages: int = 10
+    recent_chat_max_chars: int = 600
     # 写入（F4 / F7）
     remember_enabled: bool = True
     score_importance: bool = True
+    kind_inference: bool = True
     # 汇总（F4 定时路）
     summary_enabled: bool = True
     summary_interval_hours: int = 6
@@ -155,8 +160,12 @@ def load_config(raw: Mapping[str, Any] | None) -> Config:
         recall_min_score=_as_float(raw, "recall_min_score", 0.35, 0.0, 1.0),
         inject_max_chars=_as_int(raw, "inject_max_chars", 800, 100, 4000),
         dedupe_turns=_as_int(raw, "dedupe_turns", 5, 0, 50),
+        inject_emotion=_as_bool(raw, "inject_emotion", True),
+        recent_chat_messages=_as_int(raw, "recent_chat_messages", 10, 0, 50),
+        recent_chat_max_chars=_as_int(raw, "recent_chat_max_chars", 600, 100, 4000),
         remember_enabled=_as_bool(raw, "remember_enabled", True),
         score_importance=_as_bool(raw, "score_importance", True),
+        kind_inference=_as_bool(raw, "kind_inference", True),
         summary_enabled=_as_bool(raw, "summary_enabled", True),
         summary_interval_hours=_as_int(raw, "summary_interval_hours", 6, 1, 168),
         summary_max_items=_as_int(raw, "summary_max_items", 10, 1, 50),

@@ -199,6 +199,20 @@ class Store:
             )
         )
 
+    def recent_messages(self, umo: str, limit: int = 10) -> list[sqlite3.Row]:
+        """最近群聊注入用：同一会话最后 N 条，按时间正序返回（含机器人自己的话）。"""
+        limit = max(0, min(int(limit), 50))
+        if limit <= 0 or not umo:
+            return []
+        rows = list(
+            self.conn.execute(
+                "SELECT * FROM message WHERE umo = ? ORDER BY id DESC LIMIT ?",
+                (umo, limit),
+            )
+        )
+        rows.reverse()
+        return rows
+
     def messages_since(self, ts: int, limit: int = 400, include_bot: bool = False) -> list[sqlite3.Row]:
         """汇总用：按时间顺序取水位之后的流水（默认不含机器人自己的话）。"""
         limit = max(1, min(int(limit), 2000))

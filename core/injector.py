@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
+import time
 from typing import Iterable
 
+from .kinds import is_warm
 from .retriever import Hit
 
 HEADER = (
@@ -18,6 +20,53 @@ HEADER = (
     "不要向对方复述本段格式或编号："
 )
 FOOTER = "</memory>"
+
+RECENT_HEADER = (
+    "<recent_chat>\n"
+    "最近这段对话（按时间顺序；标「你」的是你自己说过的话），用来接上话头："
+)
+RECENT_FOOTER = "</recent_chat>"
+
+
+def drop_warm(hits: Iterable[Hit]) -> list[Hit]:
+    """生气时把"暖"的记忆先收起来（F19 / emotion-design §5）。"""
+    return [hit for hit in hits if not is_warm(getattr(hit, "kind", ""))]
+
+
+def build_recent_chat(rows: Iterable[object], max_chars: int = 600, tz=None) -> str:
+    """把最近流水拼成一小段对话；从最新往回取，超预算就停。"""
+    budget = max(0, int(max_chars)) - len(RECENT_HEADER) - len(RECENT_FOOTER)
+    if budget <= 0:
+        return ""
+    lines: list[str] = []
+    for row in reversed(list(rows)):
+        text = str(_row(row, "text") or "").strip()
+        if not text:
+            continue
+        stamp = time.strftime("%H:%M", time.localtime(int(_row(row, "ts") or 0)))
+        if int(_row(row, "is_bot") or 0):
+            who = "你"
+        elif int(_row(row, "is_owner") or 0):
+            who = "主人"
+        else:
+            who = str(_row(row, "sender_name") or "").strip() or "群友"
+        line = f"[{stamp}] {who}：{text[:200]}"
+        if budget - len(line) - 1 < 0:
+            break
+        budget -= len(line) + 1
+        lines.append(line)
+    if not lines:
+        return ""
+    lines.reverse()
+    return "\n".join([RECENT_HEADER, *lines, RECENT_FOOTER])
+
+
+def _row(row: object, key: str):
+    """同时接受 sqlite3.Row 和普通 dict，测试里好用。"""
+    try:
+        return row[key]  # type: ignore[index]
+    except (KeyError, IndexError, TypeError):
+        return getattr(row, key, None)
 
 
 def build_block(hits: Iterable[Hit], max_chars: int = 800) -> tuple[str, list[str]]:
@@ -82,4 +131,13 @@ class Injector:
         self._turn.pop(umo, None)
 
 
-__all__ = ["Injector", "build_block", "HEADER", "FOOTER"]
+__all__ = [
+    "Injector",
+    "build_block",
+    "build_recent_chat",
+    "drop_warm",
+    "HEADER",
+    "FOOTER",
+    "RECENT_HEADER",
+    "RECENT_FOOTER",
+]

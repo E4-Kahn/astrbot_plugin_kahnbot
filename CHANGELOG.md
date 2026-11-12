@@ -1,5 +1,42 @@
 # 更新日志
 
+## [0.3.0] - 2026-11-12
+
+### 新增（M7：情绪与上下文进对话）
+
+- `core/kinds.py`：记忆类型按关键词推断（`plan` / `preference` / `relation` / `anniversary` / `intimacy` / `fact`），
+  只在写入时跑一次正则，不调模型；`WARM_KINDS`（relation / intimacy）供生气档过滤用。
+- `core/injector.py`：新增 `<recent_chat>` 块（`build_recent_chat`）——按当前会话取最近几句流水，
+  她自己的话标「你：」，其余标昵称/主人；预算按 `recent_chat_max_chars` 从最旧的丢；
+  `drop_warm()` 供生气档从检索结果里剔掉关系类记忆。
+- `main.py`：`inject_memory` 重排为「未回话补偿 → 心情 → 检索记忆 → 最近对话」；
+  心情每轮都贴（`inject_emotion`，含「心情平常」），回避档不注入记忆；
+  生气档检索结果里剔除 `relation` / `intimacy`（F18 §5 的调制）。
+- 提醒与主动消息共用「今天主动说了几句」的额度（`proactive_day` / `proactive_count`），
+  提醒自身不受日限拦截；两者发出后都会记流水（`is_bot=1`）并回写会话历史（F16）。
+- `core/emotion.py`：`on_plan_soon()`——三天内有 `plan` 类日程时抬 `expectation`（每天一次）；
+  `on_anniversary()`——当天有纪念日时抬 `joy` / `attachment`（每天一次）；
+  拍一拍在回避档里计入 `owner_msgs`，连着拍三次会「被拍得心软了」出来。
+- `core/reminder.py`：纪念日按每年重复——到点说完把 `due_ts` 与 `schedule.md` 顺延到明年，
+  job 不摘（crontab 每年同一时刻再命中）；新增 `on_sent` 回调。
+- `core/memory.py`：写入时推断 `kind`（`kind_inference`）；`anniversary` 没写 `due_ts` 的，
+  从正文里解析日期（「5 月 20 日是我们的纪念日」）。
+- `core/summarizer.py`：汇总的 `kind` 白名单加入 `anniversary`，提示词要求保留日期。
+- 配置新增 `inject_emotion`、`recent_chat_messages`、`recent_chat_max_chars`、`kind_inference`。
+- 版本号 `0.2.0` → `0.3.0`。
+- `tests/smoke_m7.py`：类型推断、最近对话拼装与预算、生气档过滤、心情联动（日程 / 纪念日、
+  每天只一次）、拍一拍心软、写入推断、纪念日顺延与 job 保留、配置默认值与钳位的离线冒烟。
+
+### 修复
+
+- `tests/smoke_m6.py`：`check_avoidant()` 改为显式传 `NOW`——原来依赖「测试里的 NOW 约等于当前时间」，
+  跑得晚一点会让两小时回避窗口越过 `NOW + 10000`，误判为「还没气消」。
+- `core/reminder.py`：`cron_expression` 的分钟、小时补零（`05 09 12 11 *`），否则 crontab 解析失败；
+  `poll_due()` 跳过已经挂了 cron job 的条目——纪念日到点后 `due_ts` 推的是明年而不是清空，
+  兜底扫描会和 cron 各发一次，还会一路推到后年。
+- `core/emotion.py`：`render()` 增加 `always` 参数，日常状态也能回一句「心情平常」；
+  `main.inject_memory()` 用 `always=True`，才算真做到「每轮都贴」。
+
 ## [0.2.0] - 2026-11-12
 
 ### 新增（M1：数据层与记录）

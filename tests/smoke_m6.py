@@ -193,7 +193,7 @@ def test_avoidant(base: Path) -> None:
 
     # stress 飙到 0.8：立刻躲
     emotion.drives["stress"] = 0.9
-    assert emotion.check_avoidant() is not None
+    assert emotion.check_avoidant(NOW) is not None
     assert emotion.is_avoidant(), "被吓到应该立刻躲起来"
     assert emotion.state["avoid_until"] > NOW
 
@@ -204,7 +204,7 @@ def test_avoidant(base: Path) -> None:
     # blame 高位要持续 30 分钟
     fresh = Emotion(default_state(NOW))
     fresh.state["blame"] = 80.0
-    assert fresh.check_avoidant() is None, "刚开始生气不该立刻躲"
+    assert fresh.check_avoidant(NOW) is None, "刚开始生气不该立刻躲"
     assert fresh.check_avoidant(NOW + 60) is None
     assert fresh.check_avoidant(NOW + 31 * 60) is not None, "憋了半小时该躲了"
     assert fresh.is_avoidant()
@@ -217,7 +217,7 @@ def test_avoidant(base: Path) -> None:
     # 主人连发三条也会心软
     again = Emotion(default_state(NOW))
     again.drives["stress"] = 0.9
-    again.check_avoidant()
+    again.check_avoidant(NOW)
     assert again.is_avoidant()
     for i in range(AVOID_OWNER_MSGS):
         result = again.on_owner_text(f"在吗{i}")
