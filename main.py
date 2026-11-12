@@ -789,11 +789,20 @@ class KahnBot(Star):
     async def terminate(self) -> None:
         """插件被卸载 / 重载 / 停用时调用。"""
         self._pending.clear()
-        for task in list(self._tasks):
+        # 先取消、再等它们真的退出，然后才关数据库：否则后台任务可能还握着连接，
+        # 取消得干净，重载时才不会冒出 "Task was destroyed but it is pending"。
+        pending = {
+            task
+            for task in (*self._tasks, self._startup_task, self._maintenance_task)
+            if task is not None and not task.done()
+        }
+        for task in pending:
             task.cancel()
-        for task in (self._startup_task, self._maintenance_task):
-            if task is not None and not task.done():
-                task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        self._tasks.clear()
+        self._startup_task = None
+        self._maintenance_task = None
         await self.heartbeat.stop()
         save_state(self.state_path, self.emotion.snapshot())
         if self.store is not None:
