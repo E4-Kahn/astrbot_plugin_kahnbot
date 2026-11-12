@@ -102,6 +102,11 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot.git
 目录名必须是 `astrbot_plugin_kahnbot`（与 `metadata.yaml` 的 `name` 一致，配置文件名也由它推导）。
 然后在 AstrBot WebUI「插件管理」里点重载，或重启进程。
 
+> **不要在这个目录里执行 `astrbot init`。** `astrbot init` 认的是"当前目录是 AstrBot 根目录"，
+> 在插件仓库里跑会在插件目录下生成 `.astrbot`、`data/cmd_config.json`、`data/plugins/` 等一套
+> AstrBot 骨架。它们已加进 `.gitignore`，不会进提交，但会和插件自己的 `data/` 混淆。要在新机器上
+> 部署 AstrBot，请先 `cd` 到一个空目录（或 `ASTRBOT_ROOT`）再 init。
+
 验证：
 
 - 插件列表出现 KahnBot，无加载报错；

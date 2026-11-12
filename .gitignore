@@ -14,6 +14,8 @@ venv/
 env/
 
 # 本地配置与数据
+.astrbot
+astrbot.lock
 .env
 .env.*
 data/
