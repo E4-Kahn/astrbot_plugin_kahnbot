@@ -182,9 +182,10 @@ await self.context.conversation_manager.update_conversation(...)
 >
 > **实现记录（2026-11-12，M7 落地，`core/reminder.py::on_sent` + `main.py::_after_reminder_sent`）**
 >
-> - 提醒也记进「今天主动说了几句」的同一份额度（`proactive_day` / `proactive_count`），
->   和 `proactive` 共用——用户看"今天她说了几句话"就是 2 条，不管来自哪条路。
-> - 提醒本身不被日限拦（到点的承诺必须说），但会占掉当天剩下的主动额度。
+> - ~~提醒也记进「今天主动说了几句」的同一份额度~~（0.3.2 改掉：提醒**不占**主动额度，
+>   见下一条）。`proactive_daily_limit` 只约束她自己搭话。
+> - 提醒本身不被日限拦（到点的承诺必须说），也不占当天剩下的主动额度——
+>   到点的正事不该挤掉她平时闲扯的份额（用户 m01954）。
 > - 发出后：写一条 `is_bot=1` 流水（`sender_id="self"`，进最近的 `<recent_chat>`），
 >   并 `update_conversation` 回写 assistant 轮。这样她说"到点提醒你体检"之后，
 >   下一轮 10 条上下文里就有这句，不会"说完就忘"。

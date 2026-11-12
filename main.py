@@ -2,8 +2,8 @@
 
 这里只做三件事：读配置、建数据层、注册 handler / 指令；业务逻辑都在 `core/` 下。
 
-当前进度：M7（情绪与上下文进对话）之后的 0.3.1：修了提醒发完后回写历史会崩的问题，
-「记住…」放宽到"能记住…吗"这类客气问句，新增 `/kahn reset` 整机重置。
+当前进度：M7（情绪与上下文进对话）之后的 0.3.2：提醒不再挤占主动说话的额度，
+写入时剥掉"提醒我 / 10 分钟后"这类指令语，到点要说的话由打分那次调用顺手写出。
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ from .core.summarizer import Summarizer
 from .core.when import format_due
 
 PLUGIN_NAME = "astrbot_plugin_kahnbot"
-PLUGIN_VERSION = "0.3.1"
+PLUGIN_VERSION = "0.3.2"
 MAX_PENDING_TEXTS = 8
 
 
@@ -91,7 +91,9 @@ class KahnBot(Star):
         self.llm = LLMClient(self.context, self.cfg.llm_provider_id)
         self.writer: MemoryWriter | None = None
         if self.store is not None:
-            self.writer = MemoryWriter(self.store, self.files, self.embedder, self.cfg, self.llm)
+            self.writer = MemoryWriter(
+                self.store, self.files, self.embedder, self.cfg, self.llm, tz=self.tz
+            )
         self.summarizer: Summarizer | None = None
         if self.store is not None:
             self.summarizer = Summarizer(self.store, self.writer, self.llm, self.cfg)
@@ -764,10 +766,9 @@ class KahnBot(Star):
         event.stop_event()
 
         if result.reason == "added":
-            if self.cfg.score_importance:
-                self._spawn(self._rescore(result.fact_id))
-            if intent.due_ts and owner:
-                self._spawn(self.reminder.schedule_fact(result.fact_id))
+            # 打分与"到点说什么"是同一次调用：先让模型写文案，再挂提醒，
+            # 这样 schedule.md 里存的就是那句给主人听的话，而不是原指令。
+            self._spawn(self._finalize_reminder(result.fact_id, bool(intent.due_ts and owner)))
         if self.cfg.debug:
             logger.debug(
                 "KahnBot 自动记忆（%s）：%s → #%s（%s）",
@@ -794,6 +795,24 @@ class KahnBot(Star):
             await self.writer.rescore(fact_id)
         except Exception:
             logger.exception("%s 补打分失败（%s）", PLUGIN_NAME, fact_id)
+
+    async def _finalize_reminder(self, fact_id: str, due: bool) -> None:
+        """后台：打分 + 写提醒文案，然后挂提醒。
+
+        顺序很重要：`schedule.md` 里的文案来自这次调用，挂 job 时必须已经写好；
+        反过来的话，到点发出去的就是"提醒你一下：10分钟后提醒我关火"。
+        """
+        phrase = ""
+        try:
+            phrase = await self.writer.rescore(fact_id)
+        except Exception:
+            logger.exception("%s 补打分失败（%s）", PLUGIN_NAME, fact_id)
+        if not due:
+            return
+        try:
+            await self.reminder.schedule_fact(fact_id, phrase=phrase)
+        except Exception:
+            logger.exception("%s 挂提醒失败（%s）", PLUGIN_NAME, fact_id)
 
     def _scope_of(self, event: AstrMessageEvent) -> str:
         group_id = event.get_group_id() or ""
@@ -961,26 +980,14 @@ class KahnBot(Star):
             logger.exception("%s 主动消息回写历史失败（%s）", PLUGIN_NAME, umo)
 
     async def _after_reminder_sent(self, umo: str, text: str) -> None:
-        """提醒也是"她主动说的"：占一次额度、进流水、回写历史（F16，M7）。"""
-        # 计数失败不能拖累回写：回写是"说完就忘"的唯一解药。
-        try:
-            self._count_proactive_send()
-        except Exception:
-            logger.exception("%s 提醒计数失败（%s）", PLUGIN_NAME, umo)
+        """提醒也是"她主动说的"：进流水、回写历史（F16）。
+
+        不占主动说话的日限：到点的正事不该挤掉她平时搭话的额度。
+        """
         try:
             await self._write_assistant_turn(umo, text)
         except Exception:
             logger.exception("%s 提醒回写历史失败（%s）", PLUGIN_NAME, umo)
-
-    def _count_proactive_send(self) -> None:
-        """主动说话的日限与提醒共用；提醒自己不受限，只是挤掉她今天闲扯的额度。"""
-        state = self.emotion.state
-        today = _today()
-        if state.get("proactive_day") != today:
-            state["proactive_day"] = today
-            state["proactive_count"] = 0
-        state["proactive_count"] = int(state.get("proactive_count") or 0) + 1
-        save_state(self.state_path, self.emotion.snapshot())
 
     def _record_outgoing(self, umo: str, text: str) -> None:
         """她说的话也进流水：最近对话里标成"你："，但汇总时不参与事实提炼。"""

@@ -36,9 +36,10 @@ from astrbot_plugin_kahnbot.core.kinds import (  # noqa: E402
     infer_kind,
     is_warm,
 )
+from astrbot_plugin_kahnbot.core.llm import assess  # noqa: E402
 from astrbot_plugin_kahnbot.core.memory import MemoryWriter  # noqa: E402
 from astrbot_plugin_kahnbot.core.memoryfiles import MemoryFiles  # noqa: E402
-from astrbot_plugin_kahnbot.core.reminder import ReminderService  # noqa: E402
+from astrbot_plugin_kahnbot.core.reminder import ReminderService, compose_phrase  # noqa: E402
 from astrbot_plugin_kahnbot.core.reset import reset_all, snapshot  # noqa: E402
 from astrbot_plugin_kahnbot.core.retriever import Hit  # noqa: E402
 from astrbot_plugin_kahnbot.core.store import Store  # noqa: E402
@@ -287,7 +288,7 @@ def test_reminder_hooks(base: Path) -> None:
         assert asyncio.run(service.schedule_fact(r.fact_id))
         assert len(cron.jobs) == 1
         asyncio.run(service._fire(r.fact_id))
-        assert rec.sent and rec.sent[-1] == (PRIVATE, "提醒你一下：明天交房租")
+        assert rec.sent and rec.sent[-1] == (PRIVATE, "提醒主人一下：明天交房租")
         assert rec.hooks and rec.hooks[-1][0] == PRIVATE
         assert store.get_fact(r.fact_id)["due_ts"] is None
         assert not cron.jobs
@@ -315,14 +316,14 @@ def test_reminder_hooks(base: Path) -> None:
 def test_question_form() -> None:
     # 客气的委托也是委托："能不能/能 + 记住" 的疑问句要认
     r = remember.detect("鱼宝能记住明天早上10点开会吗", woken=True, wake_names=("鱼宝",))
-    assert r is not None and r.text == "明天早上10点开会", r
+    assert r is not None and r.text == "开会", r
     assert r.due_ts is not None
 
     r = remember.detect("能不能帮我记住周五交房租？", woken=True)
-    assert r is not None and "交房租" in r.text, r
+    assert r is not None and r.text == "交房租", r
 
     r = remember.detect("麻烦你记一下，下周三体检，行吗？", woken=True)
-    assert r is not None and r.text.startswith("下周三体检"), r
+    assert r is not None and r.text == "体检", r
 
     # 光秃秃的"记住…吗"更像在问"你记得吗"，不认
     assert remember.detect("记住我的生日吗", woken=True) is None
@@ -330,7 +331,7 @@ def test_question_form() -> None:
     assert remember.detect("记住了没", woken=True) is None
     # 陈述句照旧
     r = remember.detect("记住 明天下午三点开会", woken=True)
-    assert r is not None and r.text == "明天下午三点开会"
+    assert r is not None and r.text == "开会"
     print("ok 客气问句也算记住")
 
 
@@ -385,6 +386,44 @@ def test_reset(base: Path) -> None:
         store.close()
 
 
+def test_clean_body() -> None:
+    # 写入时剥掉触发词与句首时间：到点提醒就不用把原指令念一遍
+    assert remember.clean_body("10分钟后提醒我关火") == "关火"
+    assert remember.clean_body("明天是我的生日") == "我的生日"
+    assert remember.clean_body("明天早上10点开会") == "开会"
+    assert remember.clean_body("下周三要去体检") == "要去体检"
+    # 绝对日期不剥：纪念日的日期本身就是内容
+    assert remember.clean_body("5 月 20 日是我们的纪念日") == "5 月 20 日是我们的纪念日"
+    assert remember.clean_body("我喜欢冰美式") == "我喜欢冰美式"
+    assert compose_phrase("关火") == "提醒主人一下：关火"
+    print("ok 写入时剥掉指令语与时间")
+
+
+class _AssessLLM:
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+        self.prompts: list[str] = []
+
+    async def text(self, prompt, system_prompt=None):
+        self.prompts.append(prompt)
+        return self.reply
+
+
+def test_assess() -> None:
+    client = _AssessLLM('```json\n{"importance": 87, "reminder": "主人，灶上的火别忘了关"}\n```')
+    data = asyncio.run(assess(client, "关火", due_ts=NOW + 600))
+    assert data["importance"] == 87 and data["reminder"] == "主人，灶上的火别忘了关", data
+    assert "关火" in client.prompts[0]
+
+    # 模型不听话：至少把分数捞回来，文案留空（调用方退回模板）
+    data = asyncio.run(assess(_AssessLLM("我觉得 72 分"), "关火"))
+    assert data["importance"] == 72 and data["reminder"] == "", data
+
+    # 拿不到模型也不能让写入路径炸
+    assert asyncio.run(assess(None, "关火")) == {"importance": None, "reminder": ""}
+    print("ok 打分与提醒文案同一次调用")
+
+
 def test_config() -> None:
     cfg = load_config({})
     assert cfg.inject_emotion is True
@@ -419,6 +458,8 @@ def main() -> None:
         test_writer_kind(tmpdir("kind"))
         test_reminder_hooks(tmpdir("remind"))
         test_question_form()
+        test_clean_body()
+        test_assess()
         test_reset(tmpdir("reset"))
         test_config()
     finally:

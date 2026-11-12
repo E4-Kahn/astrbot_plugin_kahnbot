@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from .embeddings import cosine, pack_vector, unpack_vector
 from .kinds import ANNIVERSARY, infer_kind
-from .llm import score_importance
+from .llm import assess
 from .when import parse_due
 
 logger = logging.getLogger(__name__)
@@ -47,12 +47,13 @@ def layer_of(source: str) -> str:
 
 
 class MemoryWriter:
-    def __init__(self, store, files, embedder, cfg, llm=None) -> None:
+    def __init__(self, store, files, embedder, cfg, llm=None, tz=None) -> None:
         self.store = store
         self.files = files
         self.embedder = embedder
         self.cfg = cfg
         self.llm = llm
+        self.tz = tz
 
     # ------------------------------------------------------------------ 写入
 
@@ -189,22 +190,25 @@ class MemoryWriter:
 
     # ------------------------------------------------------------------ 维护
 
-    async def rescore(self, fact_id: str) -> int | None:
-        """后台补打分：写入时没拿到分数（或手动加的）用它补。失败保持原值。"""
+    async def rescore(self, fact_id: str) -> str:
+        """后台补打分，顺手让模型写到点要说的一句话（一次调用两件事）。
+
+        返回提醒文案（没有就是空串）；失败保持原值，不抛给调用方。
+        """
         if self.llm is None or not self.cfg.score_importance:
-            return None
+            return ""
         row = self.store.get_fact(fact_id)
         if row is None:
-            return None
-        value = await score_importance(self.llm, row["text"])
-        if value is None:
-            return None
-        self.store.set_importance(fact_id, value)
-        try:
-            self.files.update(layer_of(row["source"]), fact_id, importance=value)
-        except Exception:  # noqa: BLE001
-            logger.exception("更新 md 重要度失败（%s）", fact_id)
-        return value
+            return ""
+        data = await assess(self.llm, row["text"], due_ts=row["due_ts"], tz=self.tz)
+        value = data.get("importance")
+        if value is not None:
+            self.store.set_importance(fact_id, value)
+            try:
+                self.files.update(layer_of(row["source"]), fact_id, importance=value)
+            except Exception:  # noqa: BLE001
+                logger.exception("更新 md 重要度失败（%s）", fact_id)
+        return str(data.get("reminder") or "")
 
     async def maintain(self, now: int | None = None) -> int:
         """F7 归档：30 天没被提起、重要度 < 60、没有待提醒的，标已归档。"""

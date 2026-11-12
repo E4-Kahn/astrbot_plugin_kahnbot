@@ -7,8 +7,9 @@ KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](http
 > 躲起来期间被吞的话下次开口时还记得；沉默够久、情绪上来时她会自己找话说
 > （冷却 6 小时、日限 2 条、23:00–08:00 免打扰）。
 > 从 M7 起，每一轮回复都会带上当前心情、最近几句群聊和按需检索到的记忆；提醒发出去也算她主动说的——
-> 占一次额度、进流水、回写会话历史，不会「说完就忘」。
-> 0.3.1 修了提醒回写历史时崩溃的问题，`/kahn reset` 可以整机重置，「能记住…吗」这类客气问句也会认了。
+> 进流水、回写会话历史，不会「说完就忘」；从 0.3.2 起提醒不占主动额度。
+> 0.3.1 修了提醒回写历史时崩溃的问题，`/kahn reset` 可以整机重置，「能记住…吗」这类客气问句也会认了；
+> 0.3.2 让到点提醒说人话——「记住 10分钟后提醒我关火」存的是「关火」，到点那句由模型写。
 > 需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，实现顺序见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
 > 部署前请先看 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) 第 7 节：AstrBot 的 `add_cron_tools` 必须关掉，否则提醒会发两遍。
 

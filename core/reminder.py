@@ -23,6 +23,21 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 logger = logging.getLogger(__name__)
 
 
+PHRASE_PREFIX = "提醒主人一下："
+
+
+def compose_phrase(text: str, kind: str = "") -> str:
+    """兜底文案：模型没写出那句话时用。
+
+    事实原文在写入时已经剥掉了"提醒我""10 分钟后"这类指令语，所以这里只加一句称呼，
+    不再重复"提醒你一下：10分钟后提醒我关火"那种别扭话。
+    """
+    body = " ".join(str(text or "").split())
+    if not body:
+        return PHRASE_PREFIX.rstrip("：")
+    return f"{PHRASE_PREFIX}{body}"
+
+
 def resolve_tz(name: str | None):
     """时区名 → tzinfo；空值或非法值返回 None（用系统本地时区）。"""
     if not name:
@@ -84,7 +99,7 @@ class ReminderService:
 
     # ------------------------------------------------------------------ 挂/摘
 
-    async def schedule_fact(self, fact_id: str) -> bool:
+    async def schedule_fact(self, fact_id: str, phrase: str = "") -> bool:
         if not self.cfg.reminder_enabled:
             return False
         row = self.store.get_fact(fact_id)
@@ -99,7 +114,11 @@ class ReminderService:
         name = self.job_name(fact_id)
         # 排期与措辞落 schedule.md：到点时不用再拼，改文案也只改文件（memory-design §10）
         try:
-            phrase = self.files.schedule_phrase(fact_id) or f"提醒你一下：{row['text']}"
+            phrase = (
+                (phrase or "").strip()
+                or self.files.schedule_phrase(fact_id)
+                or compose_phrase(row["text"], row["kind"] or "")
+            )
             self.files.add_schedule(due, row["scope"] or "私聊", fact_id, phrase, self.tz)
         except Exception:  # noqa: BLE001 - 排期文件写不了也要把 job 挂上
             logger.exception("写 schedule.md 失败（%s）", fact_id)
@@ -203,7 +222,7 @@ class ReminderService:
                         self.next_anniversary(due),
                         row["scope"] or "私聊",
                         fact_id,
-                        phrase or f"提醒你一下：{row['text']}",
+                        phrase or compose_phrase(row["text"], row["kind"] or ""),
                         self.tz,
                     )
                 except Exception:  # noqa: BLE001
@@ -220,7 +239,7 @@ class ReminderService:
             if not umo:
                 logger.warning("提醒 #%s 没有会话来源，发不出去", fact_id)
                 return False
-            text = phrase or f"提醒你一下：{row['text']}"
+            text = phrase or compose_phrase(row["text"], row["kind"] or "")
             ok = bool(await self.send(umo, text))
             if ok:
                 self.store.touch_facts([fact_id], int(time.time()))

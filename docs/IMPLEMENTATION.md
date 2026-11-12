@@ -1,6 +1,6 @@
 # 实现计划（实施里程碑）
 
-> 状态：v7.1，2026-11-12；M1~M7 全部落地并跑过离线冒烟，0.3.1 为真机测试后的修复批次。
+> 状态：v7.2，2026-11-12；M1~M7 全部落地并跑过离线冒烟，0.3.1 / 0.3.2 为真机测试后的修复批次。
 > 需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
 > 设计依据 [`refs/memory-design.md`](refs/memory-design.md)、[`refs/wake-design.md`](refs/wake-design.md)
 > 与 [`refs/emotion-design.md`](refs/emotion-design.md)。
@@ -241,6 +241,21 @@ astrbot_plugin_kahnbot/
 - **双套定时**：AstrBot 的 `provider_settings.proactive_capability.add_cron_tools`（`future_task` 工具）
   会让模型自己再排一遍提醒。部署文档第 7 节写明要关；插件启动时检测到开着就打 WARNING。
 
+### 0.3.2 —— 提醒的措辞与额度 ✅ 2026-11-12
+
+- **提醒不占日限**：`_after_reminder_sent` 不再调计数，只回写历史。`proactive_daily_limit`
+  重新只约束她主动搭话；到点的正事不该挤掉平时的额度（用户 m01954）。
+  代价是理论上一天可以既提醒多次、又主动搭话 2 次——提醒数量由事实本身决定，不算骚扰源头。
+- **写入时剥指令语与时间**：`core/remember.py::clean_body` 剥句首的触发词（记住/提醒我/别忘了）
+  与相对时间（今天/明天/下周X/N 分钟后/时段/钟点），"10分钟后提醒我关火"存成"关火"。
+  **不剥绝对日期**——"5月20日是我们的纪念日"里日期就是内容，剥了就废了。
+  时间信息全部由 `due_ts` 承担，事实正文只留"要记的那件事"。
+- **到点说什么由模型写**：`core/llm.py::assess` 把"重要度 + reminder 一句话"合并进同一次调用
+  （不增加请求数），`MemoryWriter.rescore` 返回文案，`main._finalize_reminder` 先拿文案再
+  `schedule_fact(fact_id, phrase=...)`——顺序反过来就会把旧模板写进 `schedule.md`。
+  模型不给/超时退回 `compose_phrase`（「提醒主人一下：关火」）。
+  到点仍然不经过模型（读 `schedule.md` 直接发），保持 basic job 的零成本。
+
 ## 3. 依赖与顺序
 
 ```
@@ -290,7 +305,8 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
 给"换一台机器接着写"用的最小上下文。
 
 - **做到哪了**：M1 数据层、M2 唤醒与配额、M3 情绪层、M4 检索与注入、M5 长期记忆与事实分层、
-  M6 主动说话与回避档、M7 情绪与上下文进对话，全部落地并跑过 `smoke_m1~m7`；版本 `0.3.0`。动手前先
+  M6 主动说话与回避档、M7 情绪与上下文进对话，全部落地并跑过 `smoke_m1~m7`；版本 `0.3.2`
+  （0.3.1 修真机崩溃、加整机重置；0.3.2 提醒不占日限、写入剥指令语、文案交给模型）。动手前先
   `git log --oneline` 确认要不要 push。
 - **下一步（可选）**：真机跑一周校准情绪参数（`BASE` / `RATES` / 阈值 / 主动说话概率 / `_chance` 权重）；
   补 `md ↔ fact_index` 一致性校验命令；`/kahn memory expose <id>`（memory-design §9）。
@@ -314,7 +330,7 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
 - **数据在哪**：`AstrBot\data\plugin_data\astrbot_plugin_kahnbot\` 下有 `kahnbot.db`（流水 + 记忆索引 + 配额）、
   `state.json`（情绪）、`memory\facts.md`（owner 层正文）、`memory\observed.md`（见闻层）、
   `memory\schedule.md`（提醒排期）。删库即回到零状态。
-- **最容易踩的十一件事**：① 指令的 `/` 前缀在 `waking_check` 就被剥掉了，别靠字符串猜指令；
+- **最容易踩的十二件事**：① 指令的 `/` 前缀在 `waking_check` 就被剥掉了，别靠字符串猜指令；
   ② 指令正文要用 `GreedyStr`，否则带空格的内容被切碎；③ 注入走 `extra_user_content_parts` +
   `mark_as_temp()`，写 system_prompt 会毁掉前缀缓存；④ 跑 `astrbot run` 时把输出重定向到
   `$env:TEMP\astrbot-run.log`，不要写 `D:\workspace` 根（已经踩过两次，见前文"工作区洁净"）；
@@ -325,8 +341,9 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
   ⑧ 回避档拦截要放在 `wake.detect()` 之后、配额/防抖之前，否则 @ 和拍一拍也会被吞掉；
   ⑨ 纪念日到点后 `due_ts` 推到明年、**job 不摘**——摘了就只响这一次，明年不会再说；
   ⑩ `<emotion>` / `<memory>` / `<recent_chat>` 三块都是临时内容，必须 `mark_as_temp()`，
-  否则会把它们写进会话历史、越滚越长；⑪ 提醒占的是主动额度（`proactive_count`），
-  但 `decide()` 里的日限只拦主动消息本身，别把提醒也拦掉。
+  否则会把它们写进会话历史、越滚越长；⑪ 提醒**不占**主动额度（0.3.2 起），
+  `proactive_daily_limit` 只拦主动搭话，别把提醒也算进去；
+  ⑫ 提醒文案必须**先写 `schedule.md` 再挂 job**（`_finalize_reminder` 的顺序），反了就会把旧模板念出去。
 - **文档看哪本**：需求与状态 → `REQUIREMENTS.md`；里程碑 → 本文件；记忆设计 → `refs/memory-design.md`；
   唤醒 → `refs/wake-design.md`；情绪 → `refs/emotion-design.md`；部署与模型 → `DEPLOYMENT.md`；
   AstrBot 内部机制核对 → `refs/astrbot-capabilities.md`。

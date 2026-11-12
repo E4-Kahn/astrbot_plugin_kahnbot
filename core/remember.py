@@ -53,6 +53,60 @@ _REQUEST_FRAME = re.compile(
 _QUESTION_TAIL = re.compile(r"(?:[，,、]\s*)?(?:好吗|行吗|可以吗|好不好|行不行|成吗|对吧|是吧)?\s*[?？]?\s*$")
 _QUESTION_WORDS = ("吗", "么", "嘛", "呢")
 
+# 写入时剥掉句首的时间短语："明天早上10点开会"存成"开会"，时间交给 due_ts 管。
+# 只剥相对的（今天/明天/下周X/10 分钟后/时段/钟点），不剥"5 月 20 日"——纪念日的日期本身就是内容。
+_LEAD_TIME = (
+    # 先剥句首的"我"：只在后面紧跟时间时才剥，免得把"我的生日"剥成"生日"。
+    re.compile(
+        r"^(?:我|我的)\s*(?=(?:今天|明天|后天|大后天|今晚|明晚|明早|今早"
+        r"|下下?周|这周|周[一二三四五六日天]|星期[一二三四五六日天]"
+        r"|\d{1,3}\s*(?:分钟|小时|天|周|个?月)后"
+        r"|[一二两三四五六七八九十]{1,2}\s*(?:分钟|小时|天|周|个?月)后))"
+    ),
+    re.compile(r"^(?:今儿|今天|明儿|明天|后天|大后天|今晚|明晚|明早|今早|今晨|明晨)\s*"),
+    re.compile(r"^(?:下下|下|这|本)?(?:周|星期|礼拜)[一二三四五六日天]\s*"),
+    re.compile(r"^(?:\d{1,3}|[一二两三四五六七八九十]{1,2}|半|几)\s*(?:分钟|个小时|小时|天|周|个?月|年)后\s*"),
+    re.compile(r"^(?:凌晨|早上|早晨|清晨|上午|中午|下午|傍晚|晚上|夜里|夜间|半夜)\s*"),
+    re.compile(
+        r"^(?:\d{1,2}|[一二两三四五六七八九十]{1,2})\s*[点时]"
+        r"(?:\s*(?:\d{1,2}|[一二两三四五六七八九十]{1,2})\s*分?|\s*半|\s*一刻|\s*三刻)?\s*"
+    ),
+    re.compile(r"^\d{1,2}[:：]\d{2}\s*"),
+)
+_LEAD_TRIGGER = re.compile(
+    r"^(?:别忘了|不要忘了|提醒一下|提醒我|帮我记住|帮我记一下|帮我记|记一下|记下来|记住|记着|记下)\s*"
+)
+
+
+def clean_body(text: str) -> str:
+    """剥掉正文里的触发词与句首时间，只留"要记的那件事"。
+
+    "10分钟后提醒我关火" → "关火"；"明天是我的生日" → "我的生日"。
+    剥到只剩空串时由调用方当作"没东西可记"处理。
+    """
+    value = (text or "").strip(_PREFIX_CUT)
+    stripped_time = False
+    for _ in range(4):
+        before = value
+        m = _LEAD_TRIGGER.match(value)
+        if m:
+            value = value[m.end():].lstrip(_PREFIX_CUT)
+        for pattern in _LEAD_TIME:
+            hit = pattern.match(value)
+            if hit:
+                value = value[hit.end():].lstrip(_PREFIX_CUT)
+                stripped_time = True
+                break
+        if value == before:
+            break
+    if stripped_time:
+        # "明天是生日" → "是生日" → "生日"；剥完整句更像一条事实。
+        for lead in ("就是", "是"):
+            if value.startswith(lead) and len(value) > len(lead):
+                value = value[len(lead):].lstrip(_PREFIX_CUT)
+                break
+    return value.rstrip(_TRAILING)
+
 
 @dataclass(frozen=True, slots=True)
 class RememberIntent:
@@ -168,11 +222,13 @@ def detect(
     body = body.rstrip(_TRAILING)
     if question:
         body = _strip_question_tail(body)
-    if not body:
-        return None
     # "记住我"不是一件事；太短的多半是语气，不是内容。
     # 疑问句放开后门槛抬高一点，免得"能记住我的生日吗"只存下"我的生日"。
     if len(body) < (4 if question else 2):
+        return None
+    # 门槛按原句判，剥完时间剩下的才是要存的那件事（"明天早上10点开会"→"开会"）。
+    body = clean_body(body)
+    if len(body) < 2:
         return None
 
     due = parse_due(cleaned, now=now, tz=tz)

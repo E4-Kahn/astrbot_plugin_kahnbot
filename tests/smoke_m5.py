@@ -139,12 +139,12 @@ def test_when() -> None:
 
 def test_remember_detect() -> None:
     hit = remember.detect("记住，下周三要去体检", woken=True, now=NOW, tz=TZ)
-    assert hit is not None and hit.text == "下周三要去体检", hit
+    assert hit is not None and hit.text == "要去体检", hit
     assert hit.due_ts == datetime(2026, 11, 18, 9, 0).timestamp(), hit.due_ts
     assert hit.kind == "remember"
 
     remind = remember.detect("别忘了明天交报告", woken=True, now=NOW, tz=TZ)
-    assert remind is not None and remind.kind == "remind" and remind.text == "明天交报告", remind
+    assert remind is not None and remind.kind == "remind" and remind.text == "交报告", remind
 
     assert remember.detect("记住这件事", woken=False) is None, "没被叫到不认（唤醒层）"
     assert remember.detect("我记住了", woken=True) is None, "应答不是要我记"
@@ -379,7 +379,7 @@ def test_reminder(tmp: Path) -> None:
         # 到点：清 due、删排期、发一句
         await svc._fire(res.fact_id)
         assert sent and sent[0][0] == "g:1", sent
-        assert "提醒你一下" in sent[0][1], sent
+        assert "提醒主人一下" in sent[0][1], sent
         row = store.get_fact(res.fact_id)
         assert row["due_ts"] is None and not files.scheduled()
         assert cron.jobs == {}, "发完应摘掉 job"
