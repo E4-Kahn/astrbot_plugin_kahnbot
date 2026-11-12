@@ -1,5 +1,9 @@
 # KahnBot
 
+> **状态：已封存（2026-11-12）。** 代码停在 tag [`v0.4.1`](https://github.com/E4-Kahn/astrbot_plugin_kahnbot/releases/tag/v0.4.1)，
+> 不再维护。经过真机测试整体效果未达预期，测过的、没解决的、想重开时该看什么，都在
+> [`docs/STATUS.md`](docs/STATUS.md)。
+
 KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](https://github.com/E4-Kahn/astrbot_plugin_kahnbot)）。
 
 > 当前进度 **M8（分段发送）**：她会记事（「记住…」自动写入、重要度打分、见闻层、六小时汇总、

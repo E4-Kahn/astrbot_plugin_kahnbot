@@ -373,8 +373,8 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
   要重来一遍：`/kahn reset confirm`（配置 `reset_backup_dir` 非空时先备份）。
 - **交接时的 git 状态**（2026-11-12）：`origin/main` 在 `0c37934`，本地领先 3 个提交
   （`b032e26` 卸载等后台任务、`072e9d6` 0.4.1 文档、`83deea6` 待讨论方案），加上本次文档整理尚未提交；
-  要不要 push 问主人，别自作主张。本机 git 身份没配，提交沿用
-  `git -c user.name=kahn -c user.email=e4kahn@gmail.com commit`。
+  要不要 push 问主人，别自作主张。本机没配 git 身份时用本地临时身份提交即可
+  （`git -c user.name=<本地名> -c user.email=<本地邮箱> commit`），不要把真实邮箱写进仓库。
 - **数据在哪**：`AstrBot\data\plugin_data\astrbot_plugin_kahnbot\` 下有 `kahnbot.db`（流水 + 记忆索引 + 配额）、
   `state.json`（情绪）、`memory\facts.md`（owner 层正文）、`memory\observed.md`（见闻层）、
   `memory\schedule.md`（提醒排期）。删库即回到零状态。

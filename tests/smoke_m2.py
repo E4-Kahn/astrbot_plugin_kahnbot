@@ -29,7 +29,7 @@ from astrbot_plugin_kahnbot.core.store import Store  # noqa: E402
 from astrbot_plugin_kahnbot.main import KahnBot  # noqa: E402
 
 BASE = REPO_ROOT / ".smoke_tmp"
-SELF_ID = "3609107527"
+SELF_ID = "10000"  # 假号，只用来说明"这是机器人自己"
 
 
 def tmpdir(name: str) -> Path:
