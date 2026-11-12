@@ -104,6 +104,11 @@ class Config:
     summary_max_chars: int = 4000
     # 提醒（F16）
     reminder_enabled: bool = True
+    # 主动说话（F16 情绪路，M6）
+    proactive_enabled: bool = True
+    proactive_cooldown_hours: float = 6.0
+    proactive_daily_limit: int = 2
+    proactive_silence_minutes: int = 10
     timezone: str = ""
     # 模型（留空用 AstrBot 当前默认对话模型）
     llm_provider_id: str = ""
@@ -158,6 +163,10 @@ def load_config(raw: Mapping[str, Any] | None) -> Config:
         summary_min_confidence=_as_float(raw, "summary_min_confidence", 0.5, 0.0, 1.0),
         summary_max_chars=_as_int(raw, "summary_max_chars", 4000, 500, 20000),
         reminder_enabled=_as_bool(raw, "reminder_enabled", True),
+        proactive_enabled=_as_bool(raw, "proactive_enabled", True),
+        proactive_cooldown_hours=_as_float(raw, "proactive_cooldown_hours", 6.0, 0.0, 72.0),
+        proactive_daily_limit=_as_int(raw, "proactive_daily_limit", 2, 0, 10),
+        proactive_silence_minutes=_as_int(raw, "proactive_silence_minutes", 10, 0, 720),
         timezone=str(raw.get("timezone") or "").strip(),
         llm_provider_id=str(raw.get("llm_provider_id") or "").strip(),
     )

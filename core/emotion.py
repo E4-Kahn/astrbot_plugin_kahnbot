@@ -60,6 +60,15 @@ ANGRY_AT = 45.0
 AFRAID_AT = 70.0
 STRESS_AFRAID_AT = 0.80
 
+# 回避档（§11）：不是故障，是"闹脾气但都记得"
+AVOID_BLAME = 75.0          # blame 到这个值并持续 30 分钟才躲
+AVOID_BLAME_SECONDS = 30 * 60
+AVOID_STRESS = 0.80         # 被吓到可以立刻躲
+AVOID_MAX_PRIVATE = 60 * 60     # 私聊最长 1 小时
+AVOID_MAX_GROUP = 2 * 60 * 60   # 群里最长 2 小时
+AVOID_OWNER_MSGS = 3        # 主人连发 3 条还没回 → 心软出来 / 或生气时躲进去
+MAX_UNANSWERED = 20
+
 # 主人情绪事件（§6）。顺序有意义：先道歉，再责骂，最后夸奖。
 APOLOGY_WORDS = ("对不起", "抱歉", "我错了", "别生气", "消消气", "原谅", "不是故意", "抱抱", "乖")
 SCOLD_WORDS = ("滚", "烦", "闭嘴", "讨厌你", "笨", "傻", "别说话", "不想理你", "走开")
@@ -84,7 +93,12 @@ def default_state(now: int | None = None) -> dict[str, Any]:
         "last_tick_ts": ts,
         "last_owner_ts": 0,
         "last_proactive_ts": 0,
-        "proactive_count_today": 0,
+        "proactive_day": "",
+        "proactive_count": 0,
+        "proactive_count_today": 0,  # 旧字段，仅兼容
+        "blame_high_since": 0,
+        "avoid_until": 0,
+        "owner_msgs": 0,
         "unanswered": [],
         "log": [],
     }
@@ -115,11 +129,19 @@ def coerce_state(raw: Any, now: int | None = None) -> dict[str, Any]:
     if mode in {"daily", "aggrieved", "angry", "afraid", "avoidant"}:
         state["mode"] = mode
 
-    for key in ("last_tick_ts", "last_owner_ts", "last_proactive_ts"):
+    for key in ("last_tick_ts", "last_owner_ts", "last_proactive_ts", "blame_high_since", "avoid_until", "owner_msgs"):
         try:
             state[key] = int(raw.get(key, state[key]))
         except (TypeError, ValueError):
             pass
+
+    try:
+        state["proactive_count"] = int(raw.get("proactive_count", 0))
+    except (TypeError, ValueError):
+        pass
+    day = raw.get("proactive_day")
+    if isinstance(day, str):
+        state["proactive_day"] = day[:10]
 
     try:
         state["proactive_count_today"] = int(raw.get("proactive_count_today", 0))
@@ -212,6 +234,18 @@ class Emotion:
         if not value:
             return None
 
+        # 回避档：道歉立刻把她哄好；主人一直找她也会心软（§11）
+        if self.is_avoidant():
+            if _hit(value, APOLOGY_WORDS):
+                self._bump(joy=0.05)
+                self.state["blame"] = max(0.0, self.blame - 30)
+                return self._exit_avoidant("被哄好了", now)
+            state = self.state
+            state["owner_msgs"] = int(state.get("owner_msgs") or 0) + 1
+            if state["owner_msgs"] >= AVOID_OWNER_MSGS:
+                return self._exit_avoidant("主人一直在找她", now)
+            return None
+
         if _hit(value, APOLOGY_WORDS):
             self._bump(joy=0.05)
             self.state["blame"] = max(0.0, self.blame - 30)
@@ -241,6 +275,79 @@ class Emotion:
         self.drives["social"] = _clamp(self.drives["social"] + 0.1 * min(days, 7), 0.0, 0.8)
         self.drives["attachment"] = _clamp(self.drives["attachment"] + 0.03 * min(days, 7))
         self.state["mode"] = self.mode
+
+    # ---------------------------------------------------------------- 回避档（§11）
+
+    def is_avoidant(self) -> bool:
+        return self.mode == "avoidant"
+
+    def check_avoidant(self, now: int | None = None, *, private: bool = False) -> str | None:
+        """按规则进/出回避档；真正变了才返回日志条目。
+
+        进入：`stress >= 0.8`（被吓到，立刻）或 `blame >= 75` 持续 30 分钟。
+        退出：到时（私聊 1h / 群聊 2h）、被哄、或主人连发 3 条。
+        """
+        now = int(now if now is not None else time.time())
+        state = self.state
+
+        if self.is_avoidant():
+            if now >= int(state.get("avoid_until") or 0):
+                return self._exit_avoidant("气消了", now)
+            return None
+
+        if self.drives["stress"] >= AVOID_STRESS:
+            return self._enter_avoidant("被吓到", now, private)
+        if self.blame >= AVOID_BLAME:
+            since = int(state.get("blame_high_since") or 0)
+            if not since:
+                state["blame_high_since"] = now
+            elif now - since >= AVOID_BLAME_SECONDS:
+                return self._enter_avoidant("气还没消", now, private)
+        else:
+            state["blame_high_since"] = 0
+        return None
+
+    def _enter_avoidant(self, reason: str, now: int, private: bool) -> str:
+        state = self.state
+        state["mode"] = "avoidant"
+        state["avoid_until"] = now + (AVOID_MAX_PRIVATE if private else AVOID_MAX_GROUP)
+        state["owner_msgs"] = 0
+        return self._record(reason, now)
+
+    def _exit_avoidant(self, reason: str, now: int | None) -> str:
+        state = self.state
+        state["mode"] = "daily"
+        state["avoid_until"] = 0
+        state["blame_high_since"] = 0
+        state["owner_msgs"] = 0
+        state["mode"] = self.mode
+        return self._record(reason, now)
+
+    def note_replied(self, now: int | None = None) -> None:
+        """她真的出声了：清掉"主人连着找她"的计数。"""
+        self.state["owner_msgs"] = 0
+        self.state["last_reply_ts"] = int(now if now is not None else time.time())
+
+    def push_unanswered(self, text: str, umo: str = "", now: int | None = None) -> None:
+        """回避时没回的话攒起来，等下次开口时显得"其实都记得"。"""
+        value = (text or "").strip()
+        if not value:
+            return
+        items = self.state.setdefault("unanswered", [])
+        items.append(
+            {
+                "ts": int(now if now is not None else time.time()),
+                "text": value[:200],
+                "umo": umo,
+            }
+        )
+        del items[:-MAX_UNANSWERED]
+
+    def take_unanswered(self) -> list[dict[str, Any]]:
+        """取出并清空攒下的话。"""
+        items = self.state.get("unanswered") or []
+        self.state["unanswered"] = []
+        return list(items)
 
     # ---------------------------------------------------------------- 呈现
 

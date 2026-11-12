@@ -141,6 +141,21 @@ await self.context.conversation_manager.update_conversation(...)
 
 **这是 fish_heart 教的最贵的一课**：主动消息绕开事件管线，AstrBot 不会自动把 assistant 轮写进 history，必须自己回写；否则下一轮她完全不记得说过什么（TTS、表情等其它插件的 `on_llm_response` 也看不到这条）。
 
+> **实现记录（2026-11-12，M6 落地，`core/proactive.py` + `main.py::_remember_proactive_turn`）**
+>
+> - 闸门顺序：`proactive_enabled` → 回避档 → 免打扰（23:00–08:00）→ 冷却 → 日限 → 沉默 → 掷骰；
+>   概率 `0.15 + 0.35×attachment + 0.25×social + 0.35×expectation`，封顶 0.85、低于 0.2 不掷。
+>   抽成独立方法 `decide()`，`maybe_run()` 只负责生成文案 + 发送，方便 `/kahn proactive` 只做判定不发。
+> - 会话取 `store.list_messages(limit=1)` 的 `umo`——她在哪说过话就在哪开口；没有流水就不开口。
+> - 发送用 `context.send_message()`；成功后回调 `main` 的 `on_sent`，后者用
+>   `get_curr_conversation_id` → `get_conversation` → `update_conversation(history=content + [assistant])`
+>   回写。**回写失败不影响已发出的消息**，只记日志。
+> - 文案由 `core/llm.py` 生成（模型不可用退回三句模板），不在这里再调一次检索——
+>   最近三条 `owner` 记忆直接进提示词。
+> - **与设计的偏离**：设计里"记忆提醒"也算 §10 的一条路、由 proactive 统一发；
+>   实现时留在 M5 的 `core/reminder.py`（到点发、`schedule.md` 存文案），`proactive.py` 只做情绪概率路。
+>   理由：提醒要分钟级准点，挂在 cron 上比挂在 15/45 分钟的心跳上靠谱；也避免同一件事一天说两遍。
+
 ## 11. 回避档：她"不想说话"的时候
 
 回避不是故障，是"闹脾气但都记得"：不回、不注记忆、不主动说话，流水照记；被吞的话攒进 `unanswered`，
@@ -153,6 +168,21 @@ await self.context.conversation_manager.update_conversation(...)
 - **必回**：命令、@、拍一拍、"你是不是生气了""对不起"这类直接绕开回避，照常回。
 - 进入/退出都写一条日志（`/kahn mood` 能看到原因），否则事后查不出"为什么她哑了"。
 - 不回时 `event.stop_event()`，并把这条 user 轮放进 `state.unanswered`（最多 20 条）。
+
+> **实现记录（2026-11-12，M6 落地，`core/emotion.py` + `main.py`）**
+>
+> - 状态字段：`blame_high_since`（blame 首次越过 75 的时间）、`avoid_until`（到点气消）、`owner_msgs`（回避中被主人找了几次）；
+>   `proactive_day` / `proactive_count` 也落在同一份 `state.json`。
+> - `check_avoidant(now, private=...)` 在每条消息和每次心跳里调：`stress ≥ 0.8` 立刻进（"被吓到"），
+>   `blame ≥ 75` 满 30 分钟进（"气还没消"）；已回避时到 `avoid_until` 自动出（"气消了"）。
+> - 出：道歉/哄（`APOLOGY_WORDS`）`blame -= 30` 立刻出；主人连发 3 条（`AVOID_OWNER_MSGS`）心软；
+>   时长上限私聊 1h / 群聊 2h。
+> - catch-all 里位置在 `wake.detect()` 之后、配额与防抖之前：`_must_reply()`（@、拍一拍、
+>   "对不起 / 抱歉 / 我错了 / 别生气 / 在吗 / 你生气了 / 是不是生气了"）照常回，其余 `push_unanswered()` + `stop_event()`。
+>   **私聊不豁免**（Q14 允许私聊也被躲）；指令在更早的位置已经 return，不受影响。
+> - 下次开口时 `inject_memory` 取 `take_unanswered()`，拼成 `<unanswered>…（其实你都记得，只是当时没回）`
+>   追加到 `extra_user_content_parts`，注入后清空；回避档里不注入（还在生气，不给她台阶）。
+> - 进出都走 `_record()`，所以 `/kahn mood why` 能看到"气还没消 / 被哄好了 / 主人一直在找她 / 气消了"。
 
 ## 12. 与里程碑的对应
 

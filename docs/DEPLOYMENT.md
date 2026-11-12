@@ -1,7 +1,7 @@
-# 部署清单（SnowLuma + AstrBot + KahnBot）
+﻿# 部署清单（SnowLuma + AstrBot + KahnBot）
 
 > 活文档：随项目推进持续补。当前记录的是「同机测试」形态，最终目标机为另一台机器，两者步骤相同、只改绑定地址与本机路径。
-> 最后更新：2026-11-12（插件 M1~M3 已可加载，命令与配置以 README 为准）
+> 最后更新：2026-11-12（插件 M1~M6 已可加载，命令与配置以 README 为准）
 
 ## 0. 一页速查
 
@@ -12,7 +12,7 @@
 | SnowLuma | 同上 | 3001 OneBot WS Server | 127.0.0.1（本链路用不到） |
 | AstrBot | 4.29.4（pip/uv 包） | 6185 Dashboard | **127.0.0.1**（默认 0.0.0.0，需改） |
 | AstrBot | 同上 | 6199 aiocqhttp ws_reverse | 127.0.0.1（同机）；跨机才用 0.0.0.0 + token |
-| KahnBot | 0.1.0 | — | 作为插件装在 AstrBot 内 |
+| KahnBot | 0.2.0 | — | 作为插件装在 AstrBot 内 |
 
 关键路径（以 `ASTRBOT_ROOT` 指代 AstrBot 工作目录）：
 

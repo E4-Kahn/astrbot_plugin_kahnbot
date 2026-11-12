@@ -182,6 +182,30 @@
     "default": true,
     "hint": "主人说「记住，下周三体检」这类带时间的话，到点会主动发一句。群友说的只算见闻，永远不会被提醒。提醒走 AstrBot 的定时任务，重启后按库里未到期的记录重新挂上。"
   },
+  "proactive_enabled": {
+    "type": "bool",
+    "description": "主动说话",
+    "default": true,
+    "hint": "沉默够久、情绪上来时自己开口说一句（不是复读提醒）。她有脾气，回避档里不会开口；23 点到次日 8 点免打扰。"
+  },
+  "proactive_cooldown_hours": {
+    "type": "float",
+    "description": "主动说话冷却（小时）",
+    "default": 6.0,
+    "hint": "两条主动消息之间至少隔多久。调小会显得黏人，也更容易刷屏；0 表示不冷却（不建议）。"
+  },
+  "proactive_daily_limit": {
+    "type": "int",
+    "description": "每天最多主动说几句",
+    "default": 2,
+    "hint": "按自然日算，0 表示不主动说话。这个数字是硬上限，冷却和概率都在它之内生效。"
+  },
+  "proactive_silence_minutes": {
+    "type": "int",
+    "description": "沉默多久才主动开口（分钟）",
+    "default": 10,
+    "hint": "主人刚说过话的这段时间内不打扰——她不会在你说话说到一半时插嘴。按最近一次主人发言算。"
+  },
   "timezone": {
     "type": "string",
     "description": "时区",

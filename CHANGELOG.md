@@ -1,6 +1,6 @@
 # 更新日志
 
-## [Unreleased]
+## [0.2.0] - 2026-11-12
 
 ### 新增（M1：数据层与记录）
 
@@ -79,6 +79,31 @@
   `timezone`、`llm_provider_id`。
 - `tests/smoke_m5.py`：时间解析、三层判定、md 往返、写入/去重/取代/归档、汇总（假 LLM）、
   提醒（假 cron：挂/到点/兜底/重启重挂/取消）、配置默认值与裁剪的离线冒烟。
+
+### 新增（M6：主动说话与回避档）
+
+- `core/proactive.py`：主动说话的情绪概率路。闸门顺序固定为
+  总开关 → 回避档 → 免打扰（23:00–08:00）→ 冷却（默认 6 小时）→ 日限（默认 2 条）→ 沉默（默认 10 分钟）→
+  掷骰；概率 `0.15 + 0.35×attachment + 0.25×social + 0.35×expectation`，封顶 0.85、低于 0.2 不掷。
+  发送对象取最近一条流水所在的会话（她在哪说过话就在哪开口）。
+- 文案由模型基于当前情绪、时间与最近三条 `owner` 记忆生成一句话（不超过 60 字）；模型不可用时退回模板，
+  不会因为外部依赖哑掉。发送成功后回调 `main._remember_proactive_turn()` 把这一轮
+  `{"role": "assistant", ...}` 写回会话历史（F16），下一轮模型才知道自己刚说过什么。
+- "记忆确定路"（到期日程 / 纪念日）不在这里重复：由 `core/reminder.py` 在准确时刻发一条，
+  避免同一天说两遍（写进 IMPLEMENTATION 的偏离说明）。
+- `core/emotion.py` 回避档：`blame >= 75` 持续 30 分钟或被吓到（`stress >= 0.8`）进入，私聊最长 1 小时、
+  群聊最长 2 小时，到时自动气消；一句道歉 / 哄（`APOLOGY_WORDS`）立刻出来，主人连发 3 条也会心软。
+  进入时记录 `avoid_until`，`/kahn status` 能看到"躲到几点"。
+- 回避期间 catch-all 照常记录消息，但 `stop_event()` 不回复，把话攒进 `state.json` 的 `unanswered`
+  （最多 20 条）；下次开口时拼成 `<unanswered>` 块注入，提示"其实你都记得，只是当时没回"。
+  例外（`_must_reply`）：@、拍一拍、"你是不是生气了 / 对不起 / 在吗" 这类话必须回；私聊不豁免。
+- `main.py`：心跳维护依次跑 `reminder.poll_due()` → `proactive.maybe_run()` → `summarizer.maybe_run()` →
+  `writer.maintain()`，结束后统一 `save_state()`（主动说话会改冷却与日限）。
+- 新指令 `/kahn proactive [force]`：看闸门判定与概率；`force` 立刻真发一条（仅管理员）。
+- 配置新增 `proactive_enabled`、`proactive_cooldown_hours`、`proactive_daily_limit`、`proactive_silence_minutes`。
+- 版本号 `0.1.0` → `0.2.0`。
+- `tests/smoke_m6.py`：闸门顺序（沉默 / 骰子 / 免打扰 / 冷却 / 日限 / 回避 / 开关）、发送与模板兜底、
+  回写回调、回避档进入与三种退出、未回话攒存与上限、配置默认值与钳位的离线冒烟。
 
 ### 修复
 

@@ -2,10 +2,10 @@
 
 KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](https://github.com/E4-Kahn/astrbot_plugin_kahnbot)）。
 
-> 当前进度 **M5（长期记忆与事实分层）**：她在 M4 的检索之上真的开始记事——私聊里或群里被叫到后
-> 说「记住…」会写进长期记忆，重要度由模型打分，30 天没被提起且分数低的会归档；
-> 群里听来的事只进见闻层（注入时标"未必属实"、永不提醒）；攒够六小时会自己汇总流水；
-> 带时间的承诺到点会主动说一句，重启后仍然有效。
+> 当前进度 **M6（主动说话与收尾）**：她会记事（「记住…」自动写入、重要度打分、见闻层、六小时汇总、
+> 到点提醒），也有脾气：生气到一定程度会躲起来不说话，被哄或主人一直找她就会出来，
+> 躲起来期间被吞的话下次开口时还记得；沉默够久、情绪上来时她会自己找话说
+> （冷却 6 小时、日限 2 条、23:00–08:00 免打扰）。
 > 需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，实现顺序见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
 
 ## 环境要求
@@ -61,6 +61,10 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | `summary_min_confidence` | float | `0.5` | 模型标的置信度低于此值直接丢掉 |
 | `summary_max_chars` | int | `4000` | 一次汇总最多喂多少字流水，超出只留最近的 |
 | `reminder_enabled` | bool | `true` | 是否到点提醒（只对主人说的话生效；群友说的永不提醒） |
+| `proactive_enabled` | bool | `true` | 沉默够久、情绪上来时自己开口说一句（回避档里不说） |
+| `proactive_cooldown_hours` | float | `6.0` | 两条主动消息之间至少隔多久；调小更黏人 |
+| `proactive_daily_limit` | int | `2` | 每天最多主动说几句；0 = 不主动说话 |
+| `proactive_silence_minutes` | int | `10` | 主人刚说过话的这段时间内不打扰 |
 | `timezone` | string | `""` | 解析"下周三""明天八点"用；留空跟随 AstrBot 全局设置 |
 | `llm_provider_id` | string | `""` | 打分/汇总用的模型；留空用 AstrBot 当前默认对话模型 |
 
@@ -80,6 +84,7 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | `/kahn recall <问句>` | 手动检索记忆，列出分数与来源（验证 M4 用）。问句可以带空格 |
 | `/kahn mood` | 查看九维状态、当前档位与最近一次情绪变化 |
 | `/kahn mood why` | 只看最近几次情绪变化的日志 |
+| `/kahn proactive [force]` | 看主动说话的判定（冷却 / 日限 / 沉默 / 概率）；`force` 立刻真发一条（仅管理员） |
 
 ## 目录结构
 
@@ -103,13 +108,15 @@ astrbot_plugin_kahnbot/
 │   ├── memoryfiles.py       # facts.md / observed.md / schedule.md 读写
 │   ├── llm.py               # 打分与汇总用的模型客户端 + JSON 抽取
 │   ├── summarizer.py        # 定时汇总：流水 → 模型提炼 → 落条目
-│   └── reminder.py          # cron basic job 挂/摘 + 重启恢复 + 心跳兜底
+│   ├── reminder.py          # cron basic job 挂/摘 + 重启恢复 + 心跳兜底
+│   └── proactive.py         # 主动说话：情绪概率路 + 冷却 / 日限 / 免打扰
 ├── tests/                   # 离线冒烟（不启动 AstrBot）
 │   ├── smoke_m1.py          # 数据层
 │   ├── smoke_m2.py          # 唤醒 / 配额 / 防抖
 │   ├── smoke_m3.py          # 情绪漂移 / 五档 / 心跳补跳
 │   ├── smoke_m4.py          # 分词 / 排序 / 过滤 / 注入预算与去重
-│   └── smoke_m5.py          # 时间解析 / 记住判定 / md 往返 / 汇总 / 提醒
+│   ├── smoke_m5.py          # 时间解析 / 记住判定 / md 往返 / 汇总 / 提醒
+│   └── smoke_m6.py          # 主动说话闸门 / 发送兜底 / 回避档 / 未回话
 ├── metadata.yaml            # 插件元数据（名称/版本/作者/仓库）
 ├── _conf_schema.json        # WebUI 配置表单
 ├── requirements.txt         # 第三方依赖（暂无）
@@ -138,7 +145,7 @@ astrbot_plugin_kahnbot/
    Windows 上可以用 `mklink /J` 做目录联接，改代码不用来回拷）。
 2. 改完代码后在 WebUI 插件页点「重载」，或者重启 AstrBot（`astrbot run` 不带 `--reload` 不会热更）。
 3. 数据目录：`data/plugin_data/astrbot_plugin_kahnbot/`，用 `StarTools.get_data_dir()` 获取。
-4. 离线冒烟：`python tests/smoke_m1.py` … `smoke_m5.py`，不需要启动 AstrBot。
+4. 离线冒烟：`python tests/smoke_m1.py` … `smoke_m6.py`，不需要启动 AstrBot。
    环境、交接状态与常见坑见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) 第 7 节。
 
 ## 更新日志

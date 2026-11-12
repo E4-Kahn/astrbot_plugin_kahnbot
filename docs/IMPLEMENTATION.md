@@ -1,6 +1,6 @@
 # 实现计划（实施里程碑）
 
-> 状态：v5，2026-11-12；M1~M5 已落地，M6 待做。需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
+> 状态：v6，2026-11-12；M1~M6 全部落地并跑过离线冒烟。需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
 > 设计依据 [`refs/memory-design.md`](refs/memory-design.md)、[`refs/wake-design.md`](refs/wake-design.md)
 > 与 [`refs/emotion-design.md`](refs/emotion-design.md)。
 > 本文只排顺序与验收，不写实现细节；细节以设计笔记为准。
@@ -39,8 +39,8 @@ astrbot_plugin_kahnbot/
 │   ├── llm.py              # 打分与汇总用的模型客户端 + JSON 抽取 ✅
 │   ├── summarizer.py       # 定时汇总：流水 → LLM 提炼 → 落条目 ✅
 │   ├── reminder.py         # cron basic job 挂/摘 + 重启恢复 + 兜底 ✅
-│   └── proactive.py        # 主动消息生成、防重复、回写历史（M6）
-├── tests/                  # 离线冒烟（不启动 AstrBot）✅ smoke_m1 ~ smoke_m5
+│   └── proactive.py        # 主动说话：情绪概率路、闸门、回写历史 ✅
+├── tests/                  # 离线冒烟（不启动 AstrBot）✅ smoke_m1 ~ smoke_m6
 └── _conf_schema.json
 ```
 
@@ -158,18 +158,34 @@ astrbot_plugin_kahnbot/
 - 验收：群里有人说"明天是管理员的生日" → 只进 `observed.md`，次日**不会**触发提醒；
   主人说"下周三体检" → 进 `facts.md`，到点能提醒；重启后提醒仍然有效。
 
-### M6 —— 主动说话与收尾
+### M6 —— 主动说话与收尾 ✅ 2026-11-12
 
-- `proactive.py`：情绪概率路 + 记忆确定路（`owner` 层到期日程/纪念日）；
-  冷却 6 小时、日限 2 条、沉默 10 分钟；生成后 `context.send_message()`，
-  **必须** `conversation_manager.update_conversation()` 回写 assistant 轮（F16）。
-- 回避档：`event.stop_event()` + `unanswered` 补偿。
-- `_conf_schema.json` 扩全：`embedding_provider_id`、`wake_keywords`、`wake_quota_daily`、
-  `noise_patterns`、`briefing_interval`、`recent_n`、`emotion.*`、`proactive.*`。
-- README 补指令表与配置说明；CHANGELOG 起 `0.2.0`。
-- 最小自测：`tests/test_store.py`（建表/写入/迁移）、`tests/test_retriever.py`（排序与隐私过滤）、
-  `tests/test_emotion.py`（五档与补跳）。
-- 覆盖：全部。
+- `core/proactive.py`：情绪概率路。闸门顺序固定为
+  总开关 → 回避档 → 免打扰（23:00–08:00）→ 冷却（`proactive_cooldown_hours`，默认 6 小时）→
+  日限（`proactive_daily_limit`，默认 2 条）→ 沉默（默认 10 分钟）→ 掷骰。
+  概率 `0.15 + 0.35×attachment + 0.25×social + 0.35×expectation`，封顶 0.85，低于 0.2 连骰子都不掷。
+  说话对象取最近一条流水所在的会话；文案由 LLM 基于情绪 + 时间 + 最近三条 owner 记忆生成，
+  模型不可用退回模板。
+- 回写历史（F16）：发送成功后回调 `main._remember_proactive_turn()`，把
+  `{"role": "assistant", "content": text}` 追加进当前会话（`get_curr_conversation_id` →
+  `get_conversation` → `update_conversation`），异常只记日志。**这一步不能省**，否则她"说完就忘"。
+- 回避档：`blame >= 75` 持续 30 分钟或 `stress >= 0.8` 进入；私聊上限 1 小时、群聊 2 小时，
+  到时自动气消；道歉/哄立刻出来，主人连发 3 条也会心软。回避期间 catch-all 照常记录但
+  `stop_event()`，把话攒进 `state.json` 的 `unanswered`（最多 20 条），下次开口拼成 `<unanswered>`
+  块注入（"其实你都记得，只是当时没回"）。例外 `_must_reply`：@、拍一拍、
+  "你是不是生气了 / 对不起 / 在吗" 必须回；私聊不豁免（Q14）。
+- 落地情况：新增 `core/proactive.py`、`tests/smoke_m6.py`；`core/emotion.py` 加回避档状态与
+  `check_avoidant / push_unanswered / take_unanswered / note_replied`；`main.py` 接线
+  （catch-all 的回避拦截、注入 `<unanswered>`、心跳维护顺序 `poll_due → proactive → summarizer → maintain`
+  并统一落盘）、新指令 `/kahn proactive [force]`、`status` 增加主动说话与回避状态。
+  配置新增 `proactive_enabled`、`proactive_cooldown_hours`、`proactive_daily_limit`、
+  `proactive_silence_minutes`；版本号升到 `0.2.0`。
+- **与设计的偏离（去重）**：设计里"记忆确定路"指到期日程/纪念日也走 `proactive.py`；
+  实现时把它留在 M5 的 `core/reminder.py`（到点发一句、带 `schedule.md` 文案），
+  `proactive.py` 只做情绪概率路，避免同一件事一天说两遍。
+- 验收：沉默 10 分钟以上、冷却与日限未满时，她会在最近说话的会话里主动发一句；
+  `send_message` 失败不消耗冷却/日限；回避期间被 @ 仍会回，普通消息攒着；
+  道歉或连发 3 条后恢复说话，攒下的话在下一轮注入里可见。
 
 ## 3. 依赖与顺序
 
@@ -219,11 +235,11 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
 
 给"换一台机器接着写"用的最小上下文。
 
-- **做到哪了**：M1 数据层、M2 唤醒与配额、M3 情绪层、M4 检索与注入、M5 长期记忆与事实分层
-  全部落地并跑过离线冒烟；动手前先 `git log --oneline` 确认要不要 push。
-- **下一步**：M6 主动说话与收尾（`proactive.py` 情绪概率路 + 记忆确定路；冷却 6 小时、日限 2 条、
-  沉默 10 分钟；`context.send_message()` 之后必须 `conversation_manager.update_conversation()` 回写；
-  最后扩 `_conf_schema.json`、README、CHANGELOG 起 `0.2.0`）。
+- **做到哪了**：M1 数据层、M2 唤醒与配额、M3 情绪层、M4 检索与注入、M5 长期记忆与事实分层、
+  M6 主动说话与回避档，全部落地并跑过 `smoke_m1~m6`；版本 `0.2.0`。动手前先
+  `git log --oneline` 确认要不要 push。
+- **下一步（可选）**：真机跑一周校准情绪参数（`BASE` / `RATES` / 阈值 / 主动说话概率）；
+  补 `md ↔ fact_index` 一致性校验命令；`/kahn memory expose <id>`（memory-design §9）。
 - **跑测试**（不需要启动 AstrBot，用 AstrBot 自带的 Python）：
 
   ```powershell
@@ -232,6 +248,7 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
   & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m3.py
   & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m4.py
   & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m5.py
+  & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m6.py
   ```
 
   期望最后一行都是 `ALL OK`。临时目录 `.smoke_tmp/` 已 gitignore。
@@ -240,13 +257,15 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
 - **数据在哪**：`AstrBot\data\plugin_data\astrbot_plugin_kahnbot\` 下有 `kahnbot.db`（流水 + 记忆索引 + 配额）、
   `state.json`（情绪）、`memory\facts.md`（owner 层正文）、`memory\observed.md`（见闻层）、
   `memory\schedule.md`（提醒排期）。删库即回到零状态。
-- **最容易踩的六件事**：① 指令的 `/` 前缀在 `waking_check` 就被剥掉了，别靠字符串猜指令；
+- **最容易踩的八件事**：① 指令的 `/` 前缀在 `waking_check` 就被剥掉了，别靠字符串猜指令；
   ② 指令正文要用 `GreedyStr`，否则带空格的内容被切碎；③ 注入走 `extra_user_content_parts` +
   `mark_as_temp()`，写 system_prompt 会毁掉前缀缓存；④ 跑 `astrbot run` 时把输出重定向到
   `$env:TEMP\astrbot-run.log`，不要写 `D:\workspace` 根（已经踩过两次，见前文"工作区洁净"）；
   ⑤ `add_basic_job()` 没有 `run_at`，一次性提醒只能用 5 段 crontab + `persistent=False`，
   重启必须靠 `ReminderService.restore()` 重挂；⑥ 「记住…」的回执走 `event.send()` 后**必须** `stop_event()`，
-  否则同一句会再进默认 LLM 流程，等于回两遍。
+  否则同一句会再进默认 LLM 流程，等于回两遍；⑦ 主动消息发出去后**必须**回写会话历史
+  （`update_conversation`），否则下一轮她自己都不知道刚说过；⑧ 回避档拦截要放在 `wake.detect()`
+  之后、配额/防抖之前，否则 @ 和拍一拍也会被吞掉。
 - **文档看哪本**：需求与状态 → `REQUIREMENTS.md`；里程碑 → 本文件；记忆设计 → `refs/memory-design.md`；
   唤醒 → `refs/wake-design.md`；情绪 → `refs/emotion-design.md`；部署与模型 → `DEPLOYMENT.md`；
   AstrBot 内部机制核对 → `refs/astrbot-capabilities.md`。
