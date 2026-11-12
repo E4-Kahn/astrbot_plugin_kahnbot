@@ -12,12 +12,17 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import shutil
+import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT.parent))
+
+# 导入 astrbot 会在当前目录铺一套 data/；把根指到系统临时目录，别弄脏仓库。
+os.environ.setdefault("ASTRBOT_ROOT", str(Path(tempfile.gettempdir()) / "kahnbot-smoke-root"))
 
 from astrbot_plugin_kahnbot.core.args import split_importance  # noqa: E402
 from astrbot_plugin_kahnbot.core.embeddings import pack_vector, unpack_vector  # noqa: E402
