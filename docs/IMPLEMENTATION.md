@@ -1,6 +1,6 @@
 # 实现计划（实施里程碑）
 
-> 状态：v4，2026-11-12；M1~M4 已落地，M5~M6 待做。需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
+> 状态：v5，2026-11-12；M1~M5 已落地，M6 待做。需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
 > 设计依据 [`refs/memory-design.md`](refs/memory-design.md)、[`refs/wake-design.md`](refs/wake-design.md)
 > 与 [`refs/emotion-design.md`](refs/emotion-design.md)。
 > 本文只排顺序与验收，不写实现细节；细节以设计笔记为准。
@@ -26,21 +26,25 @@ astrbot_plugin_kahnbot/
 │   ├── recorder.py         # catch-all 记录 + 噪音过滤 + 昵称缓存 ✅
 │   ├── wake.py             # 唤醒判定（at / poke / name）+ 放行 ✅
 │   ├── emotion.py          # 九维情绪、五档模式、拍一拍反应 ✅
-│   ├── heartbeat.py        # 唯一的钟：tick 调度、补跳、主动说话触发 ✅
+│   ├── heartbeat.py        # 唯一的钟：tick 调度、补跳、后台维护 ✅
 │   ├── state.py            # state.json 原子读写 ✅
 │   ├── quota.py            # （未单独建文件）配额落在 store.py + main.py
-│   ├── memory.py           # md 读写、pin、30 天衰减归档
-│   ├── briefing.py         # 定时汇总：流水 → LLM 提炼 → 落条目
-│   ├── retriever.py        # 向量 + 字面混合检索
-│   ├── embeddings.py       # 复用 AstrBot Embedding Provider
-│   ├── injector.py         # on_llm_request 注入 <memory> / <recent_group_chat> / <emotion>
-│   ├── proactive.py        # 主动消息生成、防重复、回写历史
-│   └── trust.py            # 事实分层 owner / observed / raw
-├── tests/                  # 离线冒烟（不启动 AstrBot）✅
+│   ├── retriever.py        # 向量 + 字面混合检索 ✅
+│   ├── embeddings.py       # 复用 AstrBot Embedding Provider ✅
+│   ├── injector.py         # on_llm_request 注入 <memory> + N 轮去重 ✅
+│   ├── when.py             # 中文时间短语 → due_ts ✅
+│   ├── remember.py         # 「记住…」三层判定 ✅
+│   ├── memory.py           # 记忆写入：去重/取代/打分/归档/删除（含分层）✅
+│   ├── memoryfiles.py      # facts.md / observed.md / schedule.md 读写 ✅
+│   ├── llm.py              # 打分与汇总用的模型客户端 + JSON 抽取 ✅
+│   ├── summarizer.py       # 定时汇总：流水 → LLM 提炼 → 落条目 ✅
+│   ├── reminder.py         # cron basic job 挂/摘 + 重启恢复 + 兜底 ✅
+│   └── proactive.py        # 主动消息生成、防重复、回写历史（M6）
+├── tests/                  # 离线冒烟（不启动 AstrBot）✅ smoke_m1 ~ smoke_m5
 └── _conf_schema.json
 ```
 
-依赖方向：`main → (recorder, wake, quota, retriever, injector, memory, briefing, emotion, heartbeat, proactive) → store / config`。
+依赖方向：`main → (recorder, wake, retriever, injector, remember, memory, summarizer, reminder, emotion, heartbeat, proactive) → store / config`。
 `store` 不依赖任何业务模块，便于单测。`heartbeat` 是唯一调度者，其它模块不自建定时任务。
 
 ## 2. 里程碑
@@ -116,7 +120,7 @@ astrbot_plugin_kahnbot/
 - 验收：`/kahn recall 下周三` 能列出相关条目与分数；对话里问一个只在记忆里的事，回答里体现；
   群聊里问同一件私聊的事，回答里**不出现**该内容（F9）；连续两轮都命中的条目第二轮不重复注入。
 
-### M5 —— 长期记忆与事实分层
+### M5 —— 长期记忆与事实分层 ✅ 2026-11-12
 
 设计见 [`refs/memory-design.md`](refs/memory-design.md)（2026-11-12 定稿）。
 
@@ -136,6 +140,21 @@ astrbot_plugin_kahnbot/
   （`Skip scheduling basic cron job … due to missing handler`），启动时要按 `fact_index.due_ts` 重新挂；
   `platform == "cron"` 的 `CronMessageEvent` 必须挡在 catch-all 之外。
 - 覆盖：F3、F4、F7、F16（确定路）、F21。
+- 落地情况：新增 `core/when.py`（中文时间短语 → `due_ts`）、`core/remember.py`（三层判定）、
+  `core/memoryfiles.py`（`facts.md` / `observed.md` / `schedule.md` 三份 md 的读写与往返）、
+  `core/llm.py`（打分/汇总用的模型客户端 + JSON 抽取）、`core/memory.py`（`MemoryWriter`：
+  双写、md5 去重、>0.92 取代、补打分、归档、删除）、`core/summarizer.py`（增量汇总 + 水位）、
+  `core/reminder.py`（挂 cron、重启重挂、心跳兜底）；`Store.fact_index` 加 `umo` 列与
+  `messages_since / facts_with_due / due_facts / archivable` 等方法；`main.py` 在唤醒后、
+  防抖前拦截「记住…」（回执走 `event.send()` + `stop_event()`），指令新增
+  `memory drop|due|summarize`。离线冒烟 `tests/smoke_m5.py` 通过。
+- **与设计的偏离（AstrBot 4.29.4 实测）**：`add_basic_job()` 没有 `run_at` / `run_once` 参数，
+  只能填 5 段 crontab。一次性提醒改为「精确到分钟的 crontab + `persistent=False`」——
+  job 只活在内存、重启必丢，正好由启动时的 `restore()` 按 `due_ts` 重挂来恢复；
+  另加心跳 tick 里的 `poll_due()` 兜底（cron 不可用或错过触发也能发出去，发前先清 `due_ts` 保证只发一次）。
+- **与设计的偏离（成本）**：定时汇总挂在心跳 tick 上（`on_tick` 里起任务，禁止并发），
+  没另开线程或后台队列；水位存 `meta.last_summary_ts`，重启后第一次只把水位设到当下、
+  不回头啃历史（避免一次灌入大量旧事）。
 - 验收：群里有人说"明天是管理员的生日" → 只进 `observed.md`，次日**不会**触发提醒；
   主人说"下周三体检" → 进 `facts.md`，到点能提醒；重启后提醒仍然有效。
 
@@ -186,21 +205,25 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
 
 ## 6. 待补
 
-- [ ] 汇总用什么模型（跟随 AstrBot 默认 provider 还是单独指定）。
-- [x] `/kahn` 指令的最终形态：指令组 + `status` / `memory list|forget` / `mood [why]` 已落地。
+- [x] 汇总用什么模型：`llm_provider_id` 留空跟随 AstrBot 当前默认对话模型，可单独指定；
+  打分与汇总共用同一个客户端（`core/llm.py`）。
+- [x] `/kahn` 指令的最终形态：指令组 + `status` / `memory list|facts|add|drop|due|summarize|forget` / `mood [why]` 已落地。
 - [x] `/kahn memory forget` 是否限管理员：限主人或 AstrBot 管理员。
 - [x] "记住…"识别方式（Q8）：三层判定，形态闸门本轮不做（见 M5）。
 - [ ] 情绪参数（base/rate/阈值）初值，M3 跑一周后校准。
 - [ ] 是否需要 WebUI 配置页（AstrBot 插件配置页自动由 schema 生成，够用则不做；`/kahn mood` 已覆盖查看需求）。
 - [x] `astrbot_version` 下限：已抬到 `>=4.29.4`。
+- [ ] md 与索引的一致性校验（`fact_index` 可重建，chores 里还没有校验命令）。
+- [ ] `/kahn memory expose <id>`（把 private 记忆放给群聊检索，memory-design §9）。
 ## 7. 当前状态与交接（2026-11-12）
 
 给"换一台机器接着写"用的最小上下文。
 
-- **做到哪了**：M1 数据层、M2 唤醒与配额、M3 情绪层、M4 检索与注入全部落地并跑过离线冒烟；
-  本地提交到 `32dbb6b`（M4 + 两处修复），动手前先 `git log --oneline` 确认要不要 push。
-- **下一步**：M5 按"写入 → 汇总 → 提醒"三小步做；第一小步（"记住…"识别 + 重要度打分）不依赖
-  别的东西，写完用 `/kahn memory facts` 就能验证。
+- **做到哪了**：M1 数据层、M2 唤醒与配额、M3 情绪层、M4 检索与注入、M5 长期记忆与事实分层
+  全部落地并跑过离线冒烟；动手前先 `git log --oneline` 确认要不要 push。
+- **下一步**：M6 主动说话与收尾（`proactive.py` 情绪概率路 + 记忆确定路；冷却 6 小时、日限 2 条、
+  沉默 10 分钟；`context.send_message()` 之后必须 `conversation_manager.update_conversation()` 回写；
+  最后扩 `_conf_schema.json`、README、CHANGELOG 起 `0.2.0`）。
 - **跑测试**（不需要启动 AstrBot，用 AstrBot 自带的 Python）：
 
   ```powershell
@@ -208,17 +231,22 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
   & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m2.py
   & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m3.py
   & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m4.py
+  & "$env:APPDATA\uv\tools\astrbot\Scripts\python.exe" tests\smoke_m5.py
   ```
 
   期望最后一行都是 `ALL OK`。临时目录 `.smoke_tmp/` 已 gitignore。
 - **真机验证**：插件目录用 junction 链到 `AstrBot\data\plugins\astrbot_plugin_kahnbot`，
   改代码后**必须重启** `astrbot run`（不带 `--reload` 不会热更）。
 - **数据在哪**：`AstrBot\data\plugin_data\astrbot_plugin_kahnbot\` 下有 `kahnbot.db`（流水 + 记忆索引 + 配额）、
-  `state.json`（情绪）、`memory\facts.md`（记忆正文）。删库即回到零状态。
-- **最容易踩的四件事**：① 指令的 `/` 前缀在 `waking_check` 就被剥掉了，别靠字符串猜指令；
+  `state.json`（情绪）、`memory\facts.md`（owner 层正文）、`memory\observed.md`（见闻层）、
+  `memory\schedule.md`（提醒排期）。删库即回到零状态。
+- **最容易踩的六件事**：① 指令的 `/` 前缀在 `waking_check` 就被剥掉了，别靠字符串猜指令；
   ② 指令正文要用 `GreedyStr`，否则带空格的内容被切碎；③ 注入走 `extra_user_content_parts` +
   `mark_as_temp()`，写 system_prompt 会毁掉前缀缓存；④ 跑 `astrbot run` 时把输出重定向到
-  `$env:TEMP\astrbot-run.log`，不要写 `D:\workspace` 根（已经踩过两次，见前文"工作区洁净"）。
+  `$env:TEMP\astrbot-run.log`，不要写 `D:\workspace` 根（已经踩过两次，见前文"工作区洁净"）；
+  ⑤ `add_basic_job()` 没有 `run_at`，一次性提醒只能用 5 段 crontab + `persistent=False`，
+  重启必须靠 `ReminderService.restore()` 重挂；⑥ 「记住…」的回执走 `event.send()` 后**必须** `stop_event()`，
+  否则同一句会再进默认 LLM 流程，等于回两遍。
 - **文档看哪本**：需求与状态 → `REQUIREMENTS.md`；里程碑 → 本文件；记忆设计 → `refs/memory-design.md`；
   唤醒 → `refs/wake-design.md`；情绪 → `refs/emotion-design.md`；部署与模型 → `DEPLOYMENT.md`；
   AstrBot 内部机制核对 → `refs/astrbot-capabilities.md`。

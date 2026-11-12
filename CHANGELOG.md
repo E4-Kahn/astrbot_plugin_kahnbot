@@ -45,6 +45,41 @@
 - 配置新增 `inject_enabled`、`embedding_provider_id`、`recall_top_k`、`recall_min_score`、`inject_max_chars`、`dedupe_turns`。
 - 实测 bge-m3：无关句子余弦约 0.48，因此 `recall_min_score` 默认取 0.35（低于 0.3 会什么都在命中）。
 - `tests/smoke_m4.py`：分词、字面分、存储往返、隐私/取代/归档过滤、排序、无向量降级、注入预算与去重的离线冒烟。
+
+### 新增（M5：长期记忆与事实分层）
+
+- `core/remember.py`：三层判定——唤醒层（私聊常驻 / 群里被叫到）→ 句式层（"记住 / 记一下 / 记着 / 帮我记 /
+  别忘了 / 提醒我"在句首或前 6 字内，且不是疑问、应答、转述）→ 回执层（回"好，我记下了"）。
+  不做形态闸门，也不为"这句是不是要我记"调模型；群聊误判的代价比漏记高，所以句式层偏窄。
+- `core/when.py`：中文时间短语 → `due_ts`，支持今天/明天/后天/大后天、下周X、N 天后、M 月 D 日、
+  上午/下午/晚上 + N 点、14:30 等；抠不出来返回 None（宁可漏提醒，也不猜错）。
+- `core/memoryfiles.py`：`memory/facts.md`（owner 层）、`memory/observed.md`（见闻层）、
+  `memory/schedule.md`（提醒排期）三份可读、可手改的 md；行尾标记顺序固定
+  〔重要度 N〕〔已被取代 by #id〕〔已归档〕〔#fact_id〕，`parse_line` 可原样读回。
+- `core/memory.py`：所有写入的唯一出口。md5 精确去重；同 kind 余弦 >0.92 时显式写入标"已被取代"、
+  汇总路径算重复跳过；双写 md + `fact_index`（md 是权威）；`due_ts` 只留给 owner 层；
+  后台补打分、30 天未命中且重要度 <60 的归档、删除。
+- `core/llm.py`：打分与汇总共用的模型客户端（`llm_provider_id` 留空跟随 AstrBot 当前默认对话模型），
+  带超时、失败只告警一次、从回复里抽 JSON。
+- `core/summarizer.py`：从 `message` 表取水位之后的增量流水，让模型提炼长期有用的事实；
+  `is_bot=1` 只当上下文不参与提炼，`confidence < 0.5` 丢弃，单次最多 10 条，批内去重；
+  只有拿到合法 JSON 才前移水位（`meta.last_summary_ts`），模型抽风时下轮重试。
+- `core/reminder.py`：到点提醒。AstrBot 4.29.4 的 `add_basic_job()` 没有 `run_at`/`run_once`，
+  改用精确到分钟的 5 段 crontab + `persistent=False`（job 只在内存、重启必丢），
+  启动时 `restore()` 按 `fact_index.due_ts` 重挂；心跳 tick 里的 `poll_due()` 兜底，
+  发前先清 `due_ts`，cron 与兜底同时到点也只发一次。
+- 提醒文案落在 `schedule.md`（`提醒你一下：<正文>`，可直接改），不写死在 handler 里。
+- `main.py`：唤醒后、防抖前拦截「记住…」——写入、回执、`stop_event()`；owner 的话进 `facts.md` 且可提醒，
+  群友的话只进 `observed.md`（`visibility=public`、排序 ×0.6、永不提醒）。
+  `platform == "cron"` 的消息在 catch-all 最前面直接挡掉。
+- 新指令：`/kahn memory drop <fact_id>`、`/kahn memory due [n]`、`/kahn memory summarize [force]`；
+  `facts` 显示层与到期时间，`status` 显示 owner/observed 计数与待发提醒数。
+- 配置新增 `remember_enabled`、`score_importance`、`summary_enabled`、`summary_interval_hours`、
+  `summary_max_items`、`summary_min_confidence`、`summary_max_chars`、`reminder_enabled`、
+  `timezone`、`llm_provider_id`。
+- `tests/smoke_m5.py`：时间解析、三层判定、md 往返、写入/去重/取代/归档、汇总（假 LLM）、
+  提醒（假 cron：挂/到点/兜底/重启重挂/取消）、配置默认值与裁剪的离线冒烟。
+
 ### 修复
 
 - `/kahn memory add`、`/kahn recall` 的正文参数改为 `GreedyStr`：之前用普通 `str`，AstrBot 按空格切参数，

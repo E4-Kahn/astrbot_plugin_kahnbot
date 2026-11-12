@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS fact_index (
     superseded_by TEXT,
     due_ts        INTEGER,
     embedding     BLOB,
-    archived      INTEGER NOT NULL DEFAULT 0
+    archived      INTEGER NOT NULL DEFAULT 0,
+    umo           TEXT    NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_fact_hash ON fact_index(hash);
 
@@ -84,6 +85,7 @@ _EXPECTED_COLUMNS: dict[str, dict[str, str]] = {
         "due_ts": "INTEGER",
         "embedding": "BLOB",
         "archived": "INTEGER NOT NULL DEFAULT 0",
+        "umo": "TEXT NOT NULL DEFAULT ''",
     },
     "wake_quota": {
         "count": "INTEGER NOT NULL DEFAULT 0",
@@ -197,6 +199,21 @@ class Store:
             )
         )
 
+    def messages_since(self, ts: int, limit: int = 400, include_bot: bool = False) -> list[sqlite3.Row]:
+        """汇总用：按时间顺序取水位之后的流水（默认不含机器人自己的话）。"""
+        limit = max(1, min(int(limit), 2000))
+        clause = "ts > ?" if include_bot else "ts > ? AND is_bot = 0"
+        return list(
+            self.conn.execute(
+                f"SELECT * FROM message WHERE {clause} ORDER BY id ASC LIMIT ?",
+                (int(ts), limit),
+            )
+        )
+
+    def max_message_ts(self) -> int:
+        row = self.conn.execute("SELECT MAX(ts) AS ts FROM message").fetchone()
+        return int(row["ts"] or 0)
+
     def delete_message(self, row_id: int) -> bool:
         cur = self.conn.execute("DELETE FROM message WHERE id = ?", (int(row_id),))
         self.conn.commit()
@@ -229,13 +246,14 @@ class Store:
         created_ts: int,
         embedding: bytes | None = None,
         due_ts: int | None = None,
+        umo: str = "",
     ) -> int | None:
         """写入一条记忆索引；`hash` 重复（同一条事实）时返回 None。"""
         try:
             cur = self.conn.execute(
                 "INSERT INTO fact_index(fact_id, text, hash, scope, source, visibility,"
-                " kind, importance, created_ts, embedding, due_ts)"
-                " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " kind, importance, created_ts, embedding, due_ts, umo)"
+                " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     fact_id,
                     text,
@@ -248,6 +266,7 @@ class Store:
                     int(created_ts),
                     embedding,
                     due_ts,
+                    umo or "",
                 ),
             )
         except sqlite3.IntegrityError:
@@ -307,6 +326,74 @@ class Store:
         cur = self.conn.execute("DELETE FROM fact_index WHERE fact_id = ?", (fact_id,))
         self.conn.commit()
         return cur.rowcount > 0
+
+    def set_importance(self, fact_id: str, importance: int) -> None:
+        self.conn.execute(
+            "UPDATE fact_index SET importance = ? WHERE fact_id = ?",
+            (max(0, min(100, int(importance))), fact_id),
+        )
+        self.conn.commit()
+
+    def set_superseded(self, old_id: str, new_id: str) -> None:
+        """旧条被新条取代（memory-design §8.3）：默认不再参与检索。"""
+        self.conn.execute(
+            "UPDATE fact_index SET superseded_by = ? WHERE fact_id = ?",
+            (new_id, old_id),
+        )
+        self.conn.commit()
+
+    def set_archived(self, fact_id: str, archived: bool = True) -> None:
+        self.conn.execute(
+            "UPDATE fact_index SET archived = ? WHERE fact_id = ?",
+            (1 if archived else 0, fact_id),
+        )
+        self.conn.commit()
+
+    def set_due(self, fact_id: str, due_ts: int | None) -> None:
+        self.conn.execute(
+            "UPDATE fact_index SET due_ts = ? WHERE fact_id = ?",
+            (due_ts, fact_id),
+        )
+        self.conn.commit()
+
+    def clear_due(self, fact_id: str) -> None:
+        self.set_due(fact_id, None)
+
+    def facts_with_due(self, after_ts: int, before_ts: int | None = None) -> list[sqlite3.Row]:
+        """启动重挂用：还没到点、且属于可提醒层的条目。"""
+        sql = (
+            "SELECT * FROM fact_index WHERE due_ts IS NOT NULL AND due_ts > ?"
+            " AND archived = 0 AND source = 'owner'"
+        )
+        params: list[int] = [int(after_ts)]
+        if before_ts is not None:
+            sql += " AND due_ts <= ?"
+            params.append(int(before_ts))
+        sql += " ORDER BY due_ts ASC"
+        return list(self.conn.execute(sql, params))
+
+    def due_facts(self, now: int) -> list[sqlite3.Row]:
+        """兜底扫描：已经到点但还没发出去的提醒。"""
+        return list(
+            self.conn.execute(
+                "SELECT * FROM fact_index WHERE due_ts IS NOT NULL AND due_ts <= ?"
+                " AND archived = 0 AND source = 'owner' ORDER BY due_ts ASC",
+                (int(now),),
+            )
+        )
+
+    def archivable(self, now: int, days: int = 30, max_importance: int = 60) -> list[sqlite3.Row]:
+        """F7：超过 N 天没被提起、重要度又不到阈值的条目。"""
+        cutoff = int(now) - int(days) * 86400
+        return list(
+            self.conn.execute(
+                "SELECT * FROM fact_index"
+                " WHERE archived = 0 AND superseded_by IS NULL AND due_ts IS NULL"
+                " AND importance < ? AND COALESCE(last_hit_ts, created_ts) < ?"
+                " ORDER BY id ASC",
+                (int(max_importance), cutoff),
+            )
+        )
 
     # ------------------------------------------------------------------ 配额
 

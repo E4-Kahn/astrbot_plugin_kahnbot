@@ -93,6 +93,20 @@ class Config:
     recall_min_score: float = 0.35
     inject_max_chars: int = 800
     dedupe_turns: int = 5
+    # 写入（F4 / F7）
+    remember_enabled: bool = True
+    score_importance: bool = True
+    # 汇总（F4 定时路）
+    summary_enabled: bool = True
+    summary_interval_hours: int = 6
+    summary_max_items: int = 10
+    summary_min_confidence: float = 0.5
+    summary_max_chars: int = 4000
+    # 提醒（F16）
+    reminder_enabled: bool = True
+    timezone: str = ""
+    # 模型（留空用 AstrBot 当前默认对话模型）
+    llm_provider_id: str = ""
 
     def is_owner(self, sender_id: str) -> bool:
         return bool(sender_id) and sender_id in self.owner_ids
@@ -136,4 +150,14 @@ def load_config(raw: Mapping[str, Any] | None) -> Config:
         recall_min_score=_as_float(raw, "recall_min_score", 0.35, 0.0, 1.0),
         inject_max_chars=_as_int(raw, "inject_max_chars", 800, 100, 4000),
         dedupe_turns=_as_int(raw, "dedupe_turns", 5, 0, 50),
+        remember_enabled=_as_bool(raw, "remember_enabled", True),
+        score_importance=_as_bool(raw, "score_importance", True),
+        summary_enabled=_as_bool(raw, "summary_enabled", True),
+        summary_interval_hours=_as_int(raw, "summary_interval_hours", 6, 1, 168),
+        summary_max_items=_as_int(raw, "summary_max_items", 10, 1, 50),
+        summary_min_confidence=_as_float(raw, "summary_min_confidence", 0.5, 0.0, 1.0),
+        summary_max_chars=_as_int(raw, "summary_max_chars", 4000, 500, 20000),
+        reminder_enabled=_as_bool(raw, "reminder_enabled", True),
+        timezone=str(raw.get("timezone") or "").strip(),
+        llm_provider_id=str(raw.get("llm_provider_id") or "").strip(),
     )

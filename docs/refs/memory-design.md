@@ -377,11 +377,13 @@ AstrBot 4.29.4 自带 `CronJobManager`（`core/cron/manager.py:103`，底层 APS
 
 1. 事实落 `facts.md` 时若带时间（"下周三体检"），`fact_index.due_ts` 记下解析后的时间戳；
    同时在 `schedule.md` 里加一行给人看的日程。
-2. 建任务：`cron_manager.add_basic_job(name=..., cron_expression=None, run_at=due, handler=...)`——
-   需要一次性任务时用 `run_once` 语义（见 `CronJobManager.add_basic_job` 的 `persistent` 参数）。
+2. 建任务：设计时写的 `cron_manager.add_basic_job(name=..., cron_expression=None, run_at=due, ...)`
+   **在 4.29.4 上不成立**——`add_basic_job` 只有 `cron_expression`（必填，5 段 crontab），
+   没有 `run_at` / `run_once` 参数（`run_once` 只在 `add_active_job` 上有）。
+   实际做法见下方"实现记录"。
 3. 到点：handler 读对应 fact，发一句提醒（`context.send_message(umo, ...)`），然后：
    - 标 `due_ts = NULL`（提醒只响一次）；
-   - 如果是一次性任务，job 自己在 `run_once` 结束后删除。
+   - 一次性任务用 `persistent=False`，job 只在内存里，本来就不会在重启后复活。
 4. **重启恢复**：basic job 的 handler 只存在内存 `_basic_handlers` 里，重启后核心会
    打日志 `Skip scheduling basic cron job … due to missing handler`。所以启动时要自己扫一遍
    `fact_index` 里 `due_ts > now` 的条目，按 job payload 里存的 `fact_id` 重新挂 handler
@@ -395,15 +397,28 @@ AstrBot 4.29.4 自带 `CronJobManager`（`core/cron/manager.py:103`，底层 APS
 - 时区：`fact_index.due_ts` 存本地时区时间，建 job 时用 `ZoneInfo(config["timezone"])`，
   AstrBot 配置里没写就跟随系统。
 
+**实现记录（2026-11-12，M5 落地，`core/reminder.py`）**：
+
+- 一次性提醒 = 精确到分钟的 5 段 crontab（`m H d M *`）+ `persistent=False`；
+  job 名 `astrbot_plugin_kahnbot:remind:<fact_id>`，payload 不带参数、用 `functools.partial` 绑 `fact_id`
+  （`_run_basic_job` 调 handler 时不传参）。
+- 重启恢复：`ReminderService.restore()` 先按名字前缀删掉残留 basic job，再扫
+  `fact_index.due_ts > now` 重挂；插件启动时与心跳首 tick 各兜一次。
+- 兜底：心跳 tick 里 `poll_due()` 扫 `due_ts <= now` 的条目直接发，**发送前先清 `due_ts`**，
+  所以 cron 与兜底同时到点也只发一次。
+- 文案：`schedule.md` 一行存 `- YYYY-MM-DD HH:MM · [会话] · #fact_id · 到时候要说的话`，
+  handler 优先用这一行；被手改过就直接照着念。
+- 时区非法（`ZoneInfo` 抛 `ZoneInfoNotFoundError`）时退回系统本地时区并告警。
+
 ## 11. 待定与风险
 
 - [x] F14 注入位置、F15 注入预算与去重、F16 主动说话 → 均已拍板（Q5~Q7），见 REQUIREMENTS 功能表。
 - [ ] SQLite 并发：多群同时写入需 `WAL` 模式 + 单连接串行化，否则易锁（实测 `journal_mode=wal` 可正常启用，M1 已开）。
 - [ ] md 与索引一致性：只改 md 不改库（手动编辑）时，需在启动/检索时校验重建。
-- [ ] 汇总任务与消息高峰的冲突：放后台队列，别在事件管线里跑。
+- [x] 汇总任务与消息高峰的冲突：放在心跳 tick 里跑（`asyncio.create_task` + 单飞标志），不占事件管线；
+      单次最多 400 行流水 / 4000 字，6 小时一次。
 - [ ] 私聊/群聊的 `umo` 差别要让模型明确知道，否则回答会串场。
 - [ ] LLM 打分的稳定性：同一条事实两次打分可能差 20 分。缓解——分数只影响排序；
       "是否归档"用 `importance < 60 且非 owner 承诺类` 一起判，避免一次低分就被归档。
-- [ ] basic job 的重启恢复（第 10 节第 4 条）尚未实现，M5 前必须补。
-- [ ] 提醒文案不要由 handler 硬编码：`schedule.md` 里存一句"到时候怎么说"，handler 直接发；
-      否则所有提醒都是一个腔调。
+- [x] basic job 的重启恢复（第 10 节第 4 条）：M5 已实现（`ReminderService.restore()` + 心跳兜底）。
+- [x] 提醒文案不要由 handler 硬编码：`schedule.md` 里存一句"到时候怎么说"，handler 直接发。

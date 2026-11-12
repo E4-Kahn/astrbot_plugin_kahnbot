@@ -133,5 +133,65 @@
     "description": "去重轮数",
     "default": 5,
     "hint": "同一条记忆在这几轮内不重复注入，避免连续几轮都在说同一件事。填 0 关闭去重。"
+  },
+  "remember_enabled": {
+    "type": "bool",
+    "description": "识别「记住…」",
+    "default": true,
+    "hint": "开启后，私聊里或群里被叫到时说「记住…」「别忘了…」会自动写入长期记忆并回一句。判定只看句式和唤醒，不会为每条消息调模型。"
+  },
+  "score_importance": {
+    "type": "bool",
+    "description": "模型打重要度",
+    "default": true,
+    "hint": "写入后在后台让对话模型给这条记忆打 0~100 分（拿不到就保持 50）。分数只影响检索排序和归档：30 天没被提起且分数低于 60 的会归档。"
+  },
+  "summary_enabled": {
+    "type": "bool",
+    "description": "定时汇总",
+    "default": true,
+    "hint": "每隔一段时间把这段时间的聊天流水交给模型提炼长期有用的事。不消耗每条消息的成本，但每次汇总是一次完整的模型调用。"
+  },
+  "summary_interval_hours": {
+    "type": "int",
+    "description": "汇总间隔（小时）",
+    "default": 6,
+    "hint": "多久汇总一次。默认 6 小时；调小会更及时但更费 token，调大更省。插件重启后第一次不会回溯补算。"
+  },
+  "summary_max_items": {
+    "type": "int",
+    "description": "单次最多写入",
+    "default": 10,
+    "hint": "一次汇总最多新增几条记忆，超出的按模型给的置信度截断。防止某天聊太多、一次灌进来几十条。"
+  },
+  "summary_min_confidence": {
+    "type": "float",
+    "description": "汇总置信度下限",
+    "default": 0.5,
+    "hint": "模型标了把握不到这个值的条目直接丢掉。0.5 是设计文档定的默认值，调低会更敢记但错记变多。"
+  },
+  "summary_max_chars": {
+    "type": "int",
+    "description": "汇总输入上限（字）",
+    "default": 4000,
+    "hint": "一次汇总最多把多少字的流水喂给模型，超出只保留最近的。约 4000 字 ≈ 2000~3000 token。"
+  },
+  "reminder_enabled": {
+    "type": "bool",
+    "description": "到点提醒",
+    "default": true,
+    "hint": "主人说「记住，下周三体检」这类带时间的话，到点会主动发一句。群友说的只算见闻，永远不会被提醒。提醒走 AstrBot 的定时任务，重启后按库里未到期的记录重新挂上。"
+  },
+  "timezone": {
+    "type": "string",
+    "description": "时区",
+    "default": "",
+    "hint": "解析「下周三」「明天八点」和计算提醒时间用。留空跟随 AstrBot 全局设置（默认 Asia/Shanghai）。"
+  },
+  "llm_provider_id": {
+    "type": "string",
+    "description": "打分/汇总用的模型",
+    "default": "",
+    "hint": "留空 = 用 AstrBot 当前默认对话模型。重要度打分和定时汇总都走它；填错或调用失败时打分回退 50、汇总跳过，不会阻塞聊天。"
   }
 }
