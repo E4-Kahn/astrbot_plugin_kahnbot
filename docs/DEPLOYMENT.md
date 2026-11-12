@@ -1,4 +1,4 @@
-﻿# 部署清单（SnowLuma + AstrBot + KahnBot）
+# 部署清单（SnowLuma + AstrBot + KahnBot）
 
 > 活文档：随项目推进持续补。当前记录的是「同机测试」形态，最终目标机为另一台机器，两者步骤相同、只改绑定地址与本机路径。
 > 最后更新：2026-11-12（插件 M1~M6 已可加载，命令与配置以 README 为准）
@@ -12,7 +12,10 @@
 | SnowLuma | 同上 | 3001 OneBot WS Server | 127.0.0.1（本链路用不到） |
 | AstrBot | 4.29.4（pip/uv 包） | 6185 Dashboard | **127.0.0.1**（默认 0.0.0.0，需改） |
 | AstrBot | 同上 | 6199 aiocqhttp ws_reverse | 127.0.0.1（同机）；跨机才用 0.0.0.0 + token |
-| KahnBot | 0.2.0 | — | 作为插件装在 AstrBot 内 |
+| KahnBot | 0.3.1 | — | 作为插件装在 AstrBot 内 |
+
+三个最容易漏的开关：`provider_settings.proactive_capability.add_cron_tools=false`（否则提醒发两遍，
+见第 7 节）、`platform_settings.segmented_reply.enable=false`、插件配置 `owner_ids` 必须填你的 QQ 号。
 
 关键路径（以 `ASTRBOT_ROOT` 指代 AstrBot 工作目录）：
 
@@ -146,7 +149,32 @@ OpenCode Go 要求请求带 **`x-opencode-session`**（每个会话一个稳定 
 - 出处：<https://opencode.ai/docs/console/go/> 的 "Where can I use it?" 一节（请求头要求）。
   其中 "Endpoints" 表格里的地址按实测判断是错的。
 
-## 7. 联调验收清单
+## 7. 部署前必须关掉的开关（否则提醒会重复）
+
+KahnBot 的提醒走自己的 basic job：到点只发一句话，零 token。AstrBot 4.29.4 另有一个
+"让模型自己排任务"的能力（`future_task` 工具），开启后模型会顺手把你说的"十分钟后提醒我"
+再排一遍，**同一条提醒会发两次**（2026-11-12 真机实测：12:34 收到插件与 agent 各一条）。
+
+必须关掉这一项：
+
+| 配置路径（`data/cmd_config.json`） | 值 |
+| --- | --- |
+| `provider_settings.proactive_capability.add_cron_tools` | `false` |
+
+WebUI 位置：**配置 → 提供商（Provider）→ 主动能力 / Proactive Capability → 允许模型创建定时任务**，取消勾选。
+
+- 插件每次启动都会检查它；开着就会在日志里打一条 WARNING，提醒你关掉。
+- 改完需要重启 AstrBot（或重载配置）才生效。
+- 如果确实想让模型自己排任务（例如别的插件依赖 `future_task`），那就把插件配置
+  `reminder_enabled` 关掉，只留一条路——两套同时开一定会重复。
+
+另外一项建议保持默认：
+
+| 配置路径 | 值 | 原因 |
+| --- | --- | --- |
+| `platform_settings.segmented_reply.enable` | `false` | 分段回复后续由插件自己控制条数与节奏；先开原生分段会和插件的发送逻辑打架。 |
+
+## 8. 联调验收清单
 
 | # | 场景 | 期望 |
 |---|---|---|
@@ -161,13 +189,31 @@ OpenCode Go 要求请求带 **`x-opencode-session`**（每个会话一个稳定 
 | 9 | 私聊说的事在群里被问 | 不出现（F9 隐私） |
 | 10 | 改昵称后再说话 | 记忆归因不变（按 QQ 号） |
 
-## 8. 运维
+## 9. 运维
 
 - 备份：`<ASTRBOT_ROOT>/data/`（含插件数据）与 SnowLuma 的 `data/`、`onebot*.json`。
 - 升级 AstrBot：`uv tool upgrade astrbot`；升级插件：`git pull` 后重载。
 - 卸载插件：删 `data/plugins/astrbot_plugin_kahnbot`，数据在 `plugin_data/` 下可另行保留。
 
-## 9. 待确认 / 待补
+### 9.1 整机重置（记忆、情绪、流水）
+
+私聊或群聊里由主人发：
+
+```
+/kahn reset          # 先看会清掉什么
+/kahn reset confirm  # 真的清
+```
+
+会清空：流水、记忆（owner + observed）、提醒排期、情绪与主动说话计数；**插件配置不动**，
+清完自动重建空白 md、重新校准提醒 job，并给流水里出现过的每个会话在 AstrBot 侧开一个新对话
+（否则模型还能从旧对话里接上刚聊过什么）。
+
+- 正式部署建议把 `reset_backup_dir` 留空（不备份，干净利落）。
+- 开发测试想留一份再清：把 `reset_backup_dir` 指到插件数据目录之外的路径（例如
+  `D:\workspace\backup`），每次重置会先生成 `kahnbot-<时间>/`（含 `kahnbot.db`、
+  `state.json`、`memory/`）。备份失败会直接中止重置，不会出现"以为备份了其实没有"。
+
+## 10. 待确认 / 待补
 
 - [ ] 目标机的 OS 与网络（是否有公网 IP、是否走代理）。
 - [ ] QQ 账号风控策略（是否需要固定 IP、是否用手机扫码登录）。

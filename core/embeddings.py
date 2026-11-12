@@ -10,6 +10,7 @@ Ollama、DashScope 等一批 embedding 提供商；插件只需要一个 provide
 from __future__ import annotations
 
 import logging
+import time
 from array import array
 from typing import Any, Sequence
 
@@ -39,8 +40,8 @@ class EmbeddingClient:
         self._context = context
         self._provider_id = (provider_id or "").strip()
         self._provider: Any = None
-        self._resolved = False
-        self._failed = False
+        self._retry_at = 0.0
+        self._warned = False
         self._dim = 0
 
     # ------------------------------------------------------------------ 解析
@@ -54,17 +55,23 @@ class EmbeddingClient:
         return self._dim
 
     def resolve(self) -> Any:
-        """取 provider；失败只告警一次，之后直接返回 None，不再骚扰日志。"""
-        if self._resolved:
+        """取 provider；取不到就冷却 60 秒再试，告警只打一次。
+
+        插件加载早于模型加载，启动时必然是 None——不能把这次失败缓存成永久失败，
+        否则向量检索和近似去重整场都废了（2026-11-12 真机首跑踩到）。
+        """
+        if self._provider is not None:
             return self._provider
-        self._resolved = True
-        if self._failed or self._context is None:
+        if self._context is None:
+            return None
+        now = time.monotonic()
+        if self._retry_at and now < self._retry_at:
             return None
         try:
             provider = None
             if self._provider_id:
                 provider = self._context.get_provider_by_id(self._provider_id)
-                if provider is None:
+                if provider is None and not self._warned:
                     _logger.warning(
                         "KahnBot 找不到 embedding provider「%s」，检索将退回字面匹配",
                         self._provider_id,
@@ -72,15 +79,16 @@ class EmbeddingClient:
             else:
                 providers = list(self._context.get_all_embedding_providers() or [])
                 provider = providers[0] if providers else None
-                if provider is None:
+                if provider is None and not self._warned:
                     _logger.warning(
-                        "KahnBot 没有可用的 embedding provider，检索将退回字面匹配"
+                        "KahnBot 暂无可用的 embedding provider，稍后重试；期间检索退回字面匹配"
                     )
         except Exception:  # pragma: no cover - 取决于 AstrBot 版本
             _logger.exception("KahnBot 解析 embedding provider 失败")
             provider = None
         if provider is None:
-            self._failed = True
+            self._warned = True
+            self._retry_at = now + 60.0
             return None
         self._provider = provider
         try:

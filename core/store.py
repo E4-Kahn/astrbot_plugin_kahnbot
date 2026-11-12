@@ -319,6 +319,25 @@ class Store:
         row = self.conn.execute("SELECT COUNT(*) AS n FROM fact_index").fetchone()
         return int(row["n"])
 
+    def reset(self) -> dict[str, int]:
+        """清空所有业务数据、保留表结构。返回清掉前各表条数。"""
+        counts = {"messages": self.count_messages(), "facts": self.count_facts()}
+        for table in ("message", "fact_index", "wake_quota", "meta"):
+            self.conn.execute(f"DELETE FROM {table}")
+        self.conn.commit()
+        try:
+            self.conn.execute("VACUUM")
+        except sqlite3.Error:  # pragma: no cover - VACUUM 失败不影响重置
+            pass
+        return counts
+
+    def distinct_umos(self) -> list[str]:
+        """流水里出现过的会话（重置时用来给 AstrBot 那边开新对话）。"""
+        rows = self.conn.execute(
+            "SELECT DISTINCT umo FROM message WHERE umo IS NOT NULL AND umo != ''"
+        )
+        return [str(row["umo"]) for row in rows]
+
     def touch_facts(self, fact_ids: list[str], ts: int) -> None:
         """检索命中即"被提起"（F7）。"""
         if not fact_ids:

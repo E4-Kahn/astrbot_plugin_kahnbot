@@ -117,6 +117,8 @@ class Config:
     timezone: str = ""
     # 模型（留空用 AstrBot 当前默认对话模型）
     llm_provider_id: str = ""
+    # 重置（留空=不备份，只清数据；开发测试时可指向一个独立目录）
+    reset_backup_dir: str = ""
 
     def is_owner(self, sender_id: str) -> bool:
         return bool(sender_id) and sender_id in self.owner_ids
@@ -178,4 +180,5 @@ def load_config(raw: Mapping[str, Any] | None) -> Config:
         proactive_silence_minutes=_as_int(raw, "proactive_silence_minutes", 10, 0, 720),
         timezone=str(raw.get("timezone") or "").strip(),
         llm_provider_id=str(raw.get("llm_provider_id") or "").strip(),
+        reset_backup_dir=str(raw.get("reset_backup_dir") or "").strip(),
     )

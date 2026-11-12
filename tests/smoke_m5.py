@@ -128,6 +128,9 @@ def test_when() -> None:
     assert due("8 点半") == datetime(2026, 11, 13, 8, 30).timestamp(), "今天已过，应顺延到明天"
     assert due("5 月 20 日") == datetime(2027, 5, 20, 9, 0).timestamp(), "已经过去的日期应算明年"
     assert due("这周日") is not None
+    assert due("10 分钟后提醒我关火") == datetime(2026, 11, 12, 9, 10).timestamp()
+    assert due("半小时后") == datetime(2026, 11, 12, 9, 30).timestamp()
+    assert due("2 小时后") == datetime(2026, 11, 12, 11, 0).timestamp()
     assert due("随便说点什么") is None
     assert due("昨天") is None, "不猜过去的日期"
     assert format_due(int(NOW), TZ) == "2026-11-12 09:00"

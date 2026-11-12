@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT.parent))
 
 from astrbot_plugin_kahnbot.core.config import Config, load_config  # noqa: E402
+from astrbot_plugin_kahnbot.core import remember  # noqa: E402
 from astrbot_plugin_kahnbot.core.emotion import (  # noqa: E402
     AVOID_OWNER_MSGS,
     Emotion,
@@ -38,6 +39,7 @@ from astrbot_plugin_kahnbot.core.kinds import (  # noqa: E402
 from astrbot_plugin_kahnbot.core.memory import MemoryWriter  # noqa: E402
 from astrbot_plugin_kahnbot.core.memoryfiles import MemoryFiles  # noqa: E402
 from astrbot_plugin_kahnbot.core.reminder import ReminderService  # noqa: E402
+from astrbot_plugin_kahnbot.core.reset import reset_all, snapshot  # noqa: E402
 from astrbot_plugin_kahnbot.core.retriever import Hit  # noqa: E402
 from astrbot_plugin_kahnbot.core.store import Store  # noqa: E402
 
@@ -310,6 +312,79 @@ def test_reminder_hooks(base: Path) -> None:
         store.close()
 
 
+def test_question_form() -> None:
+    # 客气的委托也是委托："能不能/能 + 记住" 的疑问句要认
+    r = remember.detect("鱼宝能记住明天早上10点开会吗", woken=True, wake_names=("鱼宝",))
+    assert r is not None and r.text == "明天早上10点开会", r
+    assert r.due_ts is not None
+
+    r = remember.detect("能不能帮我记住周五交房租？", woken=True)
+    assert r is not None and "交房租" in r.text, r
+
+    r = remember.detect("麻烦你记一下，下周三体检，行吗？", woken=True)
+    assert r is not None and r.text.startswith("下周三体检"), r
+
+    # 光秃秃的"记住…吗"更像在问"你记得吗"，不认
+    assert remember.detect("记住我的生日吗", woken=True) is None
+    assert remember.detect("你记住了吗？", woken=True) is None
+    assert remember.detect("记住了没", woken=True) is None
+    # 陈述句照旧
+    r = remember.detect("记住 明天下午三点开会", woken=True)
+    assert r is not None and r.text == "明天下午三点开会"
+    print("ok 客气问句也算记住")
+
+
+def test_reset(base: Path) -> None:
+    store = Store(base / "reset.db")
+    store.open()
+    try:
+        files = MemoryFiles(base)
+        files.ensure_files()
+        cfg = load_config({})
+        writer = MemoryWriter(store, files, FakeEmbedder(), cfg, None)
+        asyncio.run(writer.add(text="下周三要去体检", source="owner", umo=PRIVATE, due_ts=NOW + 86400))
+        store.add_message(
+            ts=NOW,
+            umo=PRIVATE,
+            platform="aiocqhttp",
+            group_id=None,
+            sender_id="10001",
+            sender_name="主人",
+            is_owner=True,
+            is_bot=False,
+            text="记住 下周三要去体检",
+        )
+        store.set_meta("last_summary_ts", str(NOW))
+        assert store.distinct_umos() == [PRIVATE]
+        state_path = base / "state.json"
+        state_path.write_text('{"blame": 80}', encoding="utf-8")
+
+        # 备份 + 清空
+        report = reset_all(
+            store, files, state_path, backup_root=base / "backup", now=NOW
+        )
+        assert report["messages"] == 1 and report["facts"] == 1, report
+        backup = Path(report["backup"])
+        assert (backup / "kahnbot.db").exists()
+        assert (backup / "state.json").exists()
+        assert (backup / "memory" / "facts.md").exists()
+
+        assert store.count_messages() == 0 and store.count_facts() == 0
+        assert store.get_meta("last_summary_ts") is None
+        assert not state_path.exists()
+        assert files.load("owner") == [] and files.load("observed") == []
+        assert files.scheduled() == []
+        assert "长期记忆" in files.read("owner")  # 表头还在
+
+        # 不配备份目录就只清不备
+        asyncio.run(writer.add(text="我喜欢吃橘子", source="owner", umo=PRIVATE))
+        report2 = reset_all(store, files, state_path)
+        assert report2["backup"] == "" and store.count_facts() == 0
+        print("ok 整机重置")
+    finally:
+        store.close()
+
+
 def test_config() -> None:
     cfg = load_config({})
     assert cfg.inject_emotion is True
@@ -343,6 +418,8 @@ def main() -> None:
         test_poke_softens(tmpdir("poke"))
         test_writer_kind(tmpdir("kind"))
         test_reminder_hooks(tmpdir("remind"))
+        test_question_form()
+        test_reset(tmpdir("reset"))
         test_config()
     finally:
         shutil.rmtree(BASE_DIR, ignore_errors=True)

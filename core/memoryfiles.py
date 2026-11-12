@@ -171,6 +171,13 @@ class MemoryFiles:
         body = "\n".join(entry_line(entry) for entry in entries)
         self._write(self.path(layer), header + "\n" + body + ("\n" if body else ""))
 
+    def reset(self) -> None:
+        """清空三份 md，只留表头（整机重置用）。"""
+        self.memory_dir.mkdir(parents=True, exist_ok=True)
+        self._write(self.path("owner"), FACTS_HEADER + "\n")
+        self._write(self.path("observed"), OBSERVED_HEADER + "\n")
+        self._write(self.schedule_path(), SCHEDULE_HEADER + "\n")
+
     # ---- schedule.md -----------------------------------------------------
 
     def _schedule_lines(self) -> list[str]:

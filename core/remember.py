@@ -44,6 +44,15 @@ _TRAILING = " \t\r\n，,。.！!？?、：:；;~～…"
 
 _PREFIX_CUT = " \t\r\n，,。.！!？?、：:；;~～…"
 
+# 请求框架：「能记住…吗」「能不能帮我记一下」「麻烦你记着」。
+# 有它才把疑问句当成委托；光秃秃的"记住…吗"多半是在问"你记得吗"，不算。
+_REQUEST_FRAME = re.compile(
+    r"^(?:(?:帮我|帮忙|麻烦你?|请你?|你|那)\s*)*(?:(?:能不能|可不可以|能否|可以|能|愿意)\s*)?"
+)
+# 疑问尾巴：先把"好吗/行不行"这类剥掉，再剥单个语气词。
+_QUESTION_TAIL = re.compile(r"(?:[，,、]\s*)?(?:好吗|行吗|可以吗|好不好|行不行|成吗|对吧|是吧)?\s*[?？]?\s*$")
+_QUESTION_WORDS = ("吗", "么", "嘛", "呢")
+
 
 @dataclass(frozen=True, slots=True)
 class RememberIntent:
@@ -82,6 +91,26 @@ def _looks_question(text: str) -> bool:
     return stripped.endswith(_QUESTION_SUFFIX)
 
 
+def _request_frame_end(text: str) -> int:
+    """句首"能不能/能/帮我/麻烦你…"这类请求框架的长度；没有则 0。"""
+    m = _REQUEST_FRAME.match(text)
+    return m.end() if m else 0
+
+
+def _strip_question_tail(text: str) -> str:
+    """把"…吗？""…，好吗"剥成陈述句正文。"""
+    value = text
+    for _ in range(3):
+        before = value
+        value = _QUESTION_TAIL.sub("", value).rstrip(_TRAILING)
+        if value.endswith(_QUESTION_WORDS):
+            value = value[:-1].rstrip(_TRAILING)
+        value = value.rstrip(_TRAILING)
+        if value == before:
+            break
+    return value
+
+
 def _looks_response(text: str) -> bool:
     stripped = text.rstrip(_TRAILING)
     if stripped.startswith(_RESPONSE_PREFIX):
@@ -112,7 +141,14 @@ def detect(
     if private:
         # 私聊本身就是常驻唤醒；这个参数只用于可读性，判定逻辑相同。
         pass
-    if _looks_question(cleaned) or _looks_response(cleaned) or _looks_relay(cleaned):
+    if _looks_response(cleaned) or _looks_relay(cleaned):
+        return None
+
+    question = _looks_question(cleaned)
+    # 疑问句只有在"请求框架 + 触发词"时才当委托，例如"能记住明天十点开会吗"。
+    frame_end = _request_frame_end(cleaned)
+    framed = frame_end > 0 and any(cleaned[frame_end:].startswith(word) for word in TRIGGERS)
+    if question and not framed:
         return None
 
     hit_at = -1
@@ -130,10 +166,13 @@ def detect(
 
     body = cleaned[hit_at + len(trigger):].lstrip(_PREFIX_CUT)
     body = body.rstrip(_TRAILING)
+    if question:
+        body = _strip_question_tail(body)
     if not body:
         return None
     # "记住我"不是一件事；太短的多半是语气，不是内容。
-    if len(body) < 2:
+    # 疑问句放开后门槛抬高一点，免得"能记住我的生日吗"只存下"我的生日"。
+    if len(body) < (4 if question else 2):
         return None
 
     due = parse_due(cleaned, now=now, tz=tz)

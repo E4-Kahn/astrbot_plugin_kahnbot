@@ -8,7 +8,9 @@ KahnBot 的 AstrBot 插件仓库（GitHub: [E4-Kahn/astrbot_plugin_kahnbot](http
 > （冷却 6 小时、日限 2 条、23:00–08:00 免打扰）。
 > 从 M7 起，每一轮回复都会带上当前心情、最近几句群聊和按需检索到的记忆；提醒发出去也算她主动说的——
 > 占一次额度、进流水、回写会话历史，不会「说完就忘」。
+> 0.3.1 修了提醒回写历史时崩溃的问题，`/kahn reset` 可以整机重置，「能记住…吗」这类客气问句也会认了。
 > 需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，实现顺序见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
+> 部署前请先看 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) 第 7 节：AstrBot 的 `add_cron_tools` 必须关掉，否则提醒会发两遍。
 
 ## 环境要求
 
@@ -40,7 +42,7 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | `owner_ids` | list | `[]` | 主人 ID（QQ 号，不是昵称）；决定谁的话能进可提醒的事实层 |
 | `noise_patterns` | list | `["#sl"]` | 记录过滤：这些固定文本不进流水、不参与唤醒 |
 | `record_private` | bool | `true` | 是否记录私聊；私聊内容默认不会出现在群聊检索结果里 |
-| `record_self` | bool | `false` | 是否记录机器人自己的消息（正常不需要） |
+| `record_self` | bool | `false` | 是否把她的普通回复也记进流水（提醒/主动消息/回执本来就记，不受它控制） |
 | `wake_on_poke` | bool | `true` | 拍一拍唤醒（拍别人的不触发） |
 | `wake_on_name` | bool | `true` | 叫名字唤醒（只在消息正文里找） |
 | `wake_names` | list | `["鱼宝","大肥鱼","鱼呢"]` | 名字表；填太常见的词会天天误触发 |
@@ -73,6 +75,7 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | `proactive_silence_minutes` | int | `10` | 主人刚说过话的这段时间内不打扰 |
 | `timezone` | string | `""` | 解析"下周三""明天八点"用；留空跟随 AstrBot 全局设置 |
 | `llm_provider_id` | string | `""` | 打分/汇总用的模型；留空用 AstrBot 当前默认对话模型 |
+| `reset_backup_dir` | string | `""` | `/kahn reset confirm` 前的备份目录；留空 = 不备份（正式部署建议留空） |
 
 ## 命令
 
@@ -91,6 +94,7 @@ git clone https://github.com/E4-Kahn/astrbot_plugin_kahnbot
 | `/kahn mood` | 查看九维状态、当前档位与最近一次情绪变化 |
 | `/kahn mood why` | 只看最近几次情绪变化的日志 |
 | `/kahn proactive [force]` | 看主动说话的判定（冷却 / 日限 / 沉默 / 概率）；`force` 立刻真发一条（仅管理员） |
+| `/kahn reset [confirm]` | 清空流水、记忆、提醒排期、情绪与 AstrBot 会话上下文（插件配置不动）；不带 `confirm` 只预览（仅主人） |
 
 ## 目录结构
 

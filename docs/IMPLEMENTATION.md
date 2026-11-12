@@ -1,6 +1,7 @@
 # 实现计划（实施里程碑）
 
-> 状态：v7，2026-11-12；M1~M7 全部落地并跑过离线冒烟。需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
+> 状态：v7.1，2026-11-12；M1~M7 全部落地并跑过离线冒烟，0.3.1 为真机测试后的修复批次。
+> 需求侧依据 [`REQUIREMENTS.md`](REQUIREMENTS.md)（F1~F24），
 > 设计依据 [`refs/memory-design.md`](refs/memory-design.md)、[`refs/wake-design.md`](refs/wake-design.md)
 > 与 [`refs/emotion-design.md`](refs/emotion-design.md)。
 > 本文只排顺序与验收，不写实现细节；细节以设计笔记为准。
@@ -223,6 +224,23 @@ astrbot_plugin_kahnbot/
   提醒发出后 `/kahn memory list` 能看到 `[bot]` 那一行，下一轮对话她知道"我刚说过"；
   生日/纪念日到点说一句，明年同一天还会再说。
 
+### 0.3.1 —— 真机测试后的修复批次 ✅ 2026-11-12
+
+不是新里程碑，只记这次真机跑出来的问题与修法（详细条目见 `CHANGELOG.md`）：
+
+- **提醒发完就崩**：`_count_proactive_send()` 调了类里不存在的 `self._today()`，导致计数、流水、
+  回写历史一起抛 `AttributeError`——提醒发出去了，但下一轮她不记得。改用模块级 `_today()`，
+  并把两个收尾回调各包 `try/except`：计数失败不能拖累回写。
+- **她自己的话没进流水**：最近对话的「你：」永远是空的。`_send_text()` 成功后补记 `is_bot=1`，
+  记忆回执也记一条。
+- **客气问句不认**："能记住…吗" 被当成疑问句丢掉。判定加"请求框架"（能 / 能不能 / 帮我 / 麻烦你），
+  有框架的疑问句仍算委托，正文剥掉"吗 / 好吗 / 行吗"。
+- **整机重置**：`core/reset.py` + `/kahn reset [confirm]`，清数据不动配置；`reset_backup_dir`
+  非空时先做 sqlite 在线备份（开发测试用，正式部署留空）。重置顺便给每个会话在 AstrBot 侧
+  开新对话并清掉注入去重，模型侧也不再有旧上下文。
+- **双套定时**：AstrBot 的 `provider_settings.proactive_capability.add_cron_tools`（`future_task` 工具）
+  会让模型自己再排一遍提醒。部署文档第 7 节写明要关；插件启动时检测到开着就打 WARNING。
+
 ## 3. 依赖与顺序
 
 ```
@@ -291,6 +309,8 @@ M5 依赖 M4 的检索命中回写 `last_hit_ts`；M6 依赖 F21 的分层，否
   期望最后一行都是 `ALL OK`。临时目录 `.smoke_tmp/` 已 gitignore。
 - **真机验证**：插件目录用 junction 链到 `AstrBot\data\plugins\astrbot_plugin_kahnbot`，
   改代码后**必须重启** `astrbot run`（不带 `--reload` 不会热更）。
+  部署前先看 `DEPLOYMENT.md` 第 7 节：`add_cron_tools` 必须关，否则提醒发两遍。
+  要重来一遍：`/kahn reset confirm`（配置 `reset_backup_dir` 非空时先备份）。
 - **数据在哪**：`AstrBot\data\plugin_data\astrbot_plugin_kahnbot\` 下有 `kahnbot.db`（流水 + 记忆索引 + 配额）、
   `state.json`（情绪）、`memory\facts.md`（owner 层正文）、`memory\observed.md`（见闻层）、
   `memory\schedule.md`（提醒排期）。删库即回到零状态。

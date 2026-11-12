@@ -130,6 +130,11 @@ class Injector:
         self._seen.pop(umo, None)
         self._turn.pop(umo, None)
 
+    def reset(self) -> None:
+        """整机重置时清掉所有去重记录（旧 fact_id 不该再挡新的注入）。"""
+        self._seen.clear()
+        self._turn.clear()
+
 
 __all__ = [
     "Injector",

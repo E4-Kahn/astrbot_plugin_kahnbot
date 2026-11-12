@@ -8,6 +8,7 @@
 - 今天 / 明天 / 后天 / 大后天，今晚 / 明早 / 明晚
 - 下周X / 下下周X / 这周X / 周X / 星期X / 礼拜X（不带限定词时取"最近的那个"）
 - N 天后 / N 周后 / N 个月后（阿拉伯数字或中文数字）
+- N 分钟后 / N 小时后 / 半小时后（相对现在，用于"过会儿提醒我"）
 - M 月 D 日 / 号，下个月 D 号
 - 时间：凌晨 / 早上 / 上午 / 中午 / 下午 / 傍晚 / 晚上 + N 点（半 / 一刻 / N 分），或 14:30
 
@@ -82,6 +83,8 @@ _WEEKDAY_INDEX = {
     "7": 6,
 }
 
+_REL_MINUTES_RE = re.compile(r"(半|\d{1,3}|[一二三四五六七八九十]{1,3})\s*个?\s*分钟\s*(?:之)?后")
+_REL_HOURS_RE = re.compile(r"(半|\d{1,2}|[一二三四五六七八九十]{1,3})\s*个?\s*(?:小时|钟头)\s*(?:之)?后")
 _REL_DAYS_RE = re.compile(r"(\d{1,2}|[一二三四五六七八九十]{1,3})\s*个?\s*(天|日)\s*(?:之)?后")
 _REL_WEEKS_RE = re.compile(r"(\d{1,2}|[一二三四五六七八九十]{1,3})\s*个?\s*(?:周|星期|礼拜)\s*(?:之)?后")
 _REL_MONTHS_RE = re.compile(r"(\d{1,2}|[一二三四五六七八九十]{1,3})\s*个?\s*月\s*(?:之)?后")
@@ -183,6 +186,11 @@ def parse_due(text: str, *, now: float | None = None, tz: tzinfo | None = None) 
 
     base: date | None = None
     weekday_loose = False  # 不带"这/下"的"周X"，今天过了可以顺延到下周
+
+    # 0) N 分钟后 / N 小时后：相对现在，不按整点算（"10 分钟后提醒我关火"）
+    soon = _relative_soon(text, now_dt)
+    if soon is not None:
+        return soon
 
     # 1) 今天 / 明天 / 大后天 / 今晚 / 明早 …
     composite = next((w for w in _COMPOSITE if w in text), None)
@@ -291,6 +299,25 @@ def parse_due(text: str, *, now: float | None = None, tz: tzinfo | None = None) 
             return None
 
     return int(due.timestamp())
+
+
+def _relative_soon(text: str, now_dt: datetime) -> int | None:
+    """N 分钟/N 小时后 → 时间戳；不是这种说法返回 None（交给后面的日期解析）。"""
+    for regex, unit in ((_REL_MINUTES_RE, "minutes"), (_REL_HOURS_RE, "hours")):
+        m = regex.search(text)
+        if not m:
+            continue
+        raw = m.group(1)
+        if raw == "半":
+            delta = timedelta(minutes=30)
+        else:
+            n = _to_int(raw)
+            if not n or n <= 0:
+                return None
+            delta = timedelta(minutes=n) if unit == "minutes" else timedelta(hours=n)
+        mark = now_dt + delta
+        return int(mark.replace(second=0, microsecond=0).timestamp())
+    return None
 
 
 def _safe_date(year: int, month: int, day: int) -> date | None:

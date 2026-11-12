@@ -2,9 +2,8 @@
 
 这里只做三件事：读配置、建数据层、注册 handler / 指令；业务逻辑都在 `core/` 下。
 
-当前进度：M7（情绪与上下文进对话）。她在 M6 的基础上，每一轮回复都会带上
-当前心情（F19）、最近几句群聊（F11/F14）、按需检索到的长期记忆；提醒也说得出、
-记得住——发出去之后会占主动说话的额度并回写会话历史，不会"说完就忘"。
+当前进度：M7（情绪与上下文进对话）之后的 0.3.1：修了提醒发完后回写历史会崩的问题，
+「记住…」放宽到"能记住…吗"这类客气问句，新增 `/kahn reset` 整机重置。
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ from .core import remember, wake
 from .core.args import split_importance
 from .core.config import Config, load_config
 from .core.embeddings import EmbeddingClient
-from .core.emotion import Emotion
+from .core.emotion import Emotion, default_state
 from .core.heartbeat import Heartbeat
 from .core.injector import Injector, build_block, build_recent_chat, drop_warm
 from .core.llm import LLMClient
@@ -40,6 +39,7 @@ from .core.memoryfiles import MemoryFiles
 from .core.proactive import Proactive
 from .core.recorder import Recorder
 from .core.reminder import ReminderService, resolve_tz
+from .core.reset import reset_all
 from .core.retriever import Retriever
 from .core.state import load_state, save_state
 from .core.store import Store, now_ts
@@ -47,7 +47,7 @@ from .core.summarizer import Summarizer
 from .core.when import format_due
 
 PLUGIN_NAME = "astrbot_plugin_kahnbot"
-PLUGIN_VERSION = "0.3.0"
+PLUGIN_VERSION = "0.3.1"
 MAX_PENDING_TEXTS = 8
 
 
@@ -165,6 +165,16 @@ class KahnBot(Star):
 
         sender_id = event.get_sender_id() or ""
         private = event.is_private_chat()
+
+        # 平台把她自己的消息回推过来时，只按开关记录、绝不唤醒——
+        # 否则私聊里她会回自己，吵个没完。
+        self_id = event.get_self_id() or ""
+        if self_id and sender_id == self_id:
+            try:
+                self.recorder.record(event)
+            except Exception:
+                logger.exception("%s 记录自己的消息失败", PLUGIN_NAME)
+            return
 
         # F24：陌生人的私聊不记录、不回复，也不让内置助手代答
         if private and self.cfg.stranger_block_active and not self._is_admin(sender_id):
@@ -360,6 +370,78 @@ class KahnBot(Star):
             f"上下文：心情{'贴' if self.cfg.inject_emotion else '不贴'}；最近对话 {self.cfg.recent_chat_messages} 条（上限 {self.cfg.recent_chat_max_chars} 字）",
             "当前进度：M7（心情与上下文进对话；提醒会记进历史和额度）。",
         ]
+        yield event.plain_result("\n".join(lines))
+
+    @kahn.command("reset")
+    async def kahn_reset(self, event: AstrMessageEvent, mode: str = ""):
+        """清空所有数据（记忆、流水、提醒、情绪）；配置不动。要加 confirm"""
+        if not self._is_owner(event, event.get_sender_id() or ""):
+            yield event.plain_result("只有主人可以重置数据。")
+            return
+        confirm = str(mode or "").strip().lower() in {"confirm", "确认", "yes", "是"}
+        if not confirm:
+            owner_count, observed_count = self._fact_counts()
+            total = self.store.count_messages() if self.store else 0
+            backup = f"会先备份到 {self.cfg.reset_backup_dir}" if self.cfg.reset_backup_dir else "不备份"
+            yield event.plain_result(
+                f"这会清空：流水 {total} 条、记忆 {owner_count + observed_count} 条"
+                f"（owner {owner_count} / observed {observed_count}）、提醒排期、情绪与主动说话计数。\n"
+                f"插件配置不动；{backup}。\n"
+                "确定的话发送：/kahn reset confirm"
+            )
+            return
+
+        # AstrBot 自己的会话历史也要清：否则她还能从旧对话里接上"刚聊过什么"。
+        try:
+            umos = self.store.distinct_umos() if self.store else []
+        except Exception:
+            umos = []
+
+        try:
+            report = reset_all(
+                self.store,
+                self.files,
+                self.state_path,
+                backup_root=self.cfg.reset_backup_dir or None,
+            )
+        except Exception:
+            logger.exception("%s 重置失败", PLUGIN_NAME)
+            yield event.plain_result("重置失败，请查看日志；数据没有改动。")
+            return
+
+        # 内存里的情绪、提醒 job、检索缓存也要跟着归零，否则下一个 tick 又把旧状态写回来。
+        try:
+            self.emotion.state = default_state(int(time.time()))
+            self.emotion.state["mode"] = self.emotion.mode
+        except Exception:
+            logger.exception("%s 重置情绪失败", PLUGIN_NAME)
+        try:
+            if self.injector is not None:
+                self.injector.reset()
+        except Exception:
+            logger.exception("%s 重置注入去重失败", PLUGIN_NAME)
+        try:
+            for umo in umos:
+                await self.context.conversation_manager.new_conversation(umo)
+        except Exception:
+            logger.exception("%s 重置 AstrBot 会话失败（可手动 /new）", PLUGIN_NAME)
+        try:
+            await self.reminder.restore()
+        except Exception:
+            logger.exception("%s 重置提醒 job 失败", PLUGIN_NAME)
+        try:
+            self.files.ensure_files()
+        except Exception:
+            logger.exception("%s 重建记忆文件失败", PLUGIN_NAME)
+
+        lines = [
+            f"已重置：清掉流水 {report.get('messages', 0)} 条、记忆 {report.get('facts', 0)} 条、提醒排期与情绪状态。",
+        ]
+        if umos:
+            lines.append(f"给 {len(umos)} 个会话开了新对话（清掉模型侧的上下文）。")
+        if report.get("backup"):
+            lines.append(f"备份在：{report['backup']}")
+        lines.append("插件配置没有动。")
         yield event.plain_result("\n".join(lines))
 
     @kahn.command("mood")
@@ -676,6 +758,7 @@ class KahnBot(Star):
         receipt = self._remember_receipt(intent, result, owner)
         try:
             await event.send(MessageChain([Plain(receipt)]))
+            self._record_outgoing(event.unified_msg_origin or "", receipt)
         except Exception:
             logger.exception("%s 发送记忆回执失败", PLUGIN_NAME)
         event.stop_event()
@@ -791,6 +874,7 @@ class KahnBot(Star):
     async def _startup(self) -> None:
         try:
             self.files.ensure_files()
+            self._warn_conflicts()
             if self.reminder is not None:
                 await self.reminder.restore()
             if self.writer is not None:
@@ -799,6 +883,23 @@ class KahnBot(Star):
                 await self.retriever.ensure_embeddings(limit=50)
         except Exception:
             logger.exception("%s 启动任务失败", PLUGIN_NAME)
+
+    def _warn_conflicts(self) -> None:
+        """启动时把"会和本插件打架"的 AstrBot 开关指出来（配置在 WebUI，插件改不了）。"""
+        try:
+            settings = self.context.get_config() or {}
+        except Exception:  # pragma: no cover
+            return
+        provider_settings = settings.get("provider_settings") or {}
+        capability = provider_settings.get("proactive_capability") or {}
+        if capability.get("add_cron_tools"):
+            logger.warning(
+                "%s：AstrBot 给模型的 future_task 工具是开着的"
+                "（provider_settings.proactive_capability.add_cron_tools=true）。"
+                "模型会自己排提醒，和插件的提醒重复发；建议在 WebUI 配置里关掉，"
+                "见 docs/DEPLOYMENT.md「部署前必须改的两项」。",
+                PLUGIN_NAME,
+            )
 
     def _spawn(self, coro) -> None:
         """后台小任务：不阻塞回执，出问题只记日志。"""
@@ -811,12 +912,16 @@ class KahnBot(Star):
         task.add_done_callback(self._tasks.discard)
 
     async def _send_text(self, umo: str, text: str) -> bool:
-        """提醒用：直接按会话发一句，不经过 LLM。"""
+        """提醒/主动消息用：直接按会话发一句，不经过 LLM。"""
         try:
-            return bool(await self.context.send_message(umo, MessageChain([Plain(text)])))
+            ok = bool(await self.context.send_message(umo, MessageChain([Plain(text)])))
         except Exception:
-            logger.exception("%s 发送提醒失败（%s）", PLUGIN_NAME, umo)
+            logger.exception("%s 发送失败（%s）", PLUGIN_NAME, umo)
             return False
+        if ok:
+            # 她说过的话要进流水，最近对话里才能标成"你："（F11/F14）。
+            self._record_outgoing(umo, text)
+        return ok
 
     def _must_reply(self, reason: str, text: str) -> bool:
         """回避档里也一定要回的情况：被叫到名字、被问"是不是生气了"、道歉。"""
@@ -850,19 +955,27 @@ class KahnBot(Star):
 
     async def _after_proactive_sent(self, umo: str, text: str) -> None:
         """主动说完一句：记进流水（最近对话能看到）、回写会话历史（下一轮知道自己说过）。"""
-        self._record_outgoing(umo, text)
-        await self._write_assistant_turn(umo, text)
+        try:
+            await self._write_assistant_turn(umo, text)
+        except Exception:
+            logger.exception("%s 主动消息回写历史失败（%s）", PLUGIN_NAME, umo)
 
     async def _after_reminder_sent(self, umo: str, text: str) -> None:
         """提醒也是"她主动说的"：占一次额度、进流水、回写历史（F16，M7）。"""
-        self._count_proactive_send()
-        self._record_outgoing(umo, text)
-        await self._write_assistant_turn(umo, text)
+        # 计数失败不能拖累回写：回写是"说完就忘"的唯一解药。
+        try:
+            self._count_proactive_send()
+        except Exception:
+            logger.exception("%s 提醒计数失败（%s）", PLUGIN_NAME, umo)
+        try:
+            await self._write_assistant_turn(umo, text)
+        except Exception:
+            logger.exception("%s 提醒回写历史失败（%s）", PLUGIN_NAME, umo)
 
     def _count_proactive_send(self) -> None:
         """主动说话的日限与提醒共用；提醒自己不受限，只是挤掉她今天闲扯的额度。"""
         state = self.emotion.state
-        today = self._today()
+        today = _today()
         if state.get("proactive_day") != today:
             state["proactive_day"] = today
             state["proactive_count"] = 0

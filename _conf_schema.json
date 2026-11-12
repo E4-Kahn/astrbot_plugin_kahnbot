@@ -41,7 +41,7 @@
     "type": "bool",
     "description": "记录机器人自己的消息",
     "default": false,
-    "hint": "一般不需要开：她自己的回复和主动消息会标成 is_bot，汇总时不参与事实提炼。"
+    "hint": "只管她的普通回复：开着会把她自己说的话也记进流水（标 is_bot，汇总时不用）。提醒、主动消息、记忆回执本来就记，不受这个开关影响。"
   },
   "wake_on_poke": {
     "type": "bool",
@@ -241,5 +241,11 @@
     "description": "打分/汇总用的模型",
     "default": "",
     "hint": "留空 = 用 AstrBot 当前默认对话模型。重要度打分和定时汇总都走它；填错或调用失败时打分回退 50、汇总跳过，不会阻塞聊天。"
+  },
+  "reset_backup_dir": {
+    "type": "string",
+    "description": "重置前的备份目录",
+    "default": "",
+    "hint": "`/kahn reset confirm` 会先把这个目录下建一个 `kahnbot-<时间>/` 再清数据。留空 = 不备份（正式部署建议留空）；开发测试可以填一个插件数据目录之外的路径。"
   }
 }
